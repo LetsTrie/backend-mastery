@@ -1,0 +1,12 @@
+# Author and reviewer profiles. Keys are referenced from chapter frontmatter
+# (`authors`, `reviewers`) and are permanent.
+#
+# example-key:
+#   name: Full Name
+#   role: Staff Engineer
+#   bio: One sentence.
+#   url: https://example.com
+#   github: handle
+#
+# Replace `{}` below with the first entry when adding an author.
+{}

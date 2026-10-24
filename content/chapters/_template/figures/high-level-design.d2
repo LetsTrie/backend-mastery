@@ -1,0 +1,27 @@
+...@../../../_shared/d2/base
+
+direction: down
+
+client: Client app {class: client}
+gw: API gateway {class: gateway}
+
+backend: Our platform {
+  class: boundary
+  direction: right
+  api: Service API {class: service}
+  cache: Cache {class: cache}
+  db: Primary DB {class: datastore}
+  q: Work queue {class: queue}
+  worker: Worker {class: service}
+}
+
+provider: Third-party provider {class: external}
+
+client -> gw: "① HTTPS"
+gw -> backend.api: "② route"
+backend.api -> backend.cache: "③ read-through"
+backend.api -> backend.db: "④ write"
+backend.api -> backend.q: "⑤ enqueue" {class: async}
+backend.q -> backend.worker: "⑥ consume" {class: async}
+backend.worker -> provider: "⑦ deliver" {class: focus}
+backend.worker -> backend.q: "retry with backoff" {class: failure}

@@ -1,0 +1,38 @@
+# Canonical term definitions. Keys are permanent (anchors: /glossary#<key>).
+# `owner` is the chapter that explains the term in depth (may be planned).
+# Definitions: one or two plain sentences, no circular references.
+
+backpressure:
+  term: Backpressure
+  definition: A mechanism by which a slower downstream component signals upstream producers to slow down, instead of buffering without bound.
+  owner: message-queues
+
+dead-letter-queue:
+  term: Dead-letter queue (DLQ)
+  definition: A separate queue that holds messages a consumer repeatedly failed to process, so they can be inspected without blocking healthy traffic.
+  owner: message-queues
+
+fan-out:
+  term: Fan-out
+  definition: Delivering one logical event to many recipients or downstream consumers.
+  owner: design-a-news-feed
+
+idempotency-key:
+  term: Idempotency key
+  definition: A client-supplied unique identifier that lets a server recognize retries of the same request and apply its effect only once.
+  owner: idempotency
+
+p99:
+  term: p99 latency
+  definition: The latency below which 99% of requests complete; the slowest 1% take longer.
+  owner: latency-and-throughput-numbers
+
+qps:
+  term: Queries per second (QPS)
+  definition: The number of requests a system or component handles each second; we distinguish average from peak.
+  owner: back-of-the-envelope-estimation
+
+ttl:
+  term: Time-to-live (TTL)
+  definition: How long a piece of data remains valid before it expires and must be refreshed or discarded.
+  owner: caching

@@ -1,0 +1,53 @@
+# Shared node/edge classes and layout — the visual language of every diagram.
+# Rules: .claude/rules/diagrams-and-figures.md. Accent/danger hex values mirror
+# --color-diagram-accent / --color-diagram-danger in src/styles/tokens.css.
+# Color is semantic: everything neutral; accent only via `focus`, red only via `failure`.
+
+vars: {
+  d2-config: {
+    layout-engine: elk
+    pad: 32
+  }
+}
+
+classes: {
+  # ── Nodes ────────────────────────────────────────────────────────────
+  actor: {shape: person}
+  client: {
+    shape: rectangle
+    style.border-radius: 8
+  }
+  service: {
+    shape: rectangle
+    style.border-radius: 4
+  }
+  gateway: {shape: hexagon}
+  datastore: {shape: cylinder}
+  cache: {shape: stored_data}
+  queue: {shape: queue}
+  blob: {shape: page}
+  external: {shape: cloud}
+  job: {
+    shape: rectangle
+    style.stroke-dash: 4
+  }
+  boundary: {
+    style.stroke-dash: 4
+    style.fill: transparent
+    style.font-size: 14
+  }
+
+  # ── Edges ────────────────────────────────────────────────────────────
+  async: {style.stroke-dash: 5}
+  failure: {
+    style.stroke: "#C0392B"
+    style.font-color: "#C0392B"
+    style.stroke-dash: 3
+  }
+
+  # ── Emphasis (max one focus area per figure) ─────────────────────────
+  focus: {
+    style.stroke: "#D9730D"
+    style.stroke-width: 3
+  }
+}

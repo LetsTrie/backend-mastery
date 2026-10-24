@@ -1,0 +1,16 @@
+...@../../../_shared/d2/base
+
+shape: sequence_diagram
+
+client: Client app {class: client}
+api: Notification API {class: service}
+store: Dedup store {class: datastore}
+
+client -> api: "① POST /v1/notifications"
+api -> store: "② SET key IF NOT EXISTS"
+store -> api: "③ created"
+api -> client: "④ 202 Accepted"
+client -> api: "retry after timeout (same key)" {class: failure}
+api -> store: "SET key IF NOT EXISTS"
+store -> api: "exists" {class: focus}
+api -> client: "202 Accepted (deduplicated)"

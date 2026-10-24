@@ -1,0 +1,45 @@
+# Book structure. Order here = reading order = display chapter numbers.
+# `chapters` holds slugs that exist in content/chapters/. `planned` is the roadmap
+# (not rendered); move a slug from planned → chapters when its folder is created.
+# Part keys are permanent (they are URLs: /parts/<key>).
+
+parts:
+  - key: foundations
+    title: Foundations
+    description: The vocabulary and arithmetic of system design.
+    chapters: []
+    planned:
+      - how-to-approach-system-design
+      - back-of-the-envelope-estimation
+      - latency-and-throughput-numbers
+      - availability-slos-and-error-budgets
+
+  - key: building-blocks
+    title: Building blocks
+    description: Reusable components and techniques that case studies are built from.
+    chapters: []
+    planned:
+      - load-balancing
+      - caching
+      - message-queues
+      - consistent-hashing
+      - idempotency
+      - rate-limiting-algorithms
+      - replication
+      - sharding-and-partitioning
+      - consistency-models
+      - unique-id-generation
+
+  - key: case-studies
+    title: Case studies
+    description: End-to-end designs of real-world systems, from requirements to failure modes.
+    chapters: []
+    planned:
+      - design-a-rate-limiter
+      - design-a-url-shortener
+      - design-a-notification-system
+      - design-a-chat-system
+      - design-a-news-feed
+      - design-a-distributed-job-scheduler
+      - design-a-search-autocomplete
+      - design-a-payment-system

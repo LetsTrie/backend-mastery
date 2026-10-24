@@ -1,0 +1,143 @@
+---
+slug: _kitchen-sink
+kind: essay
+title: Kitchen sink
+subtitle: Every MDX component in one place — a design and regression fixture
+description: >-
+  A development-only fixture that renders every component in the MDX catalog,
+  used to check typography, theming, and layout whenever the design changes.
+part: foundations
+tags: [fixture]
+prerequisites: []
+status: draft
+authors: []
+reviewers: []
+updated: 2026-10-24
+references:
+  - title: "Designing Data-Intensive Applications"
+    authors: "Martin Kleppmann"
+    year: 2017
+    url: https://dataintensive.net/
+revisions:
+  - date: 2026-10-24
+    note: Fixture created.
+---
+
+{/* Dev-only fixture (never published). Add a usage here whenever a component is added. */}
+
+<KeyTakeaways>
+- Every component in the catalog renders here, in both light and dark themes.
+- If this page looks wrong, every chapter looks wrong.
+- Fixtures live in `_`-prefixed folders and never ship to production.
+</KeyTakeaways>
+
+Body text sets the tone for the whole book. A chapter is read for 30 minutes at a time, so the measure stays near 68 characters and the line height is generous. Inline `code`, **strong text**, and [internal links](/chapters) all appear in running prose. The first use of a glossary term such as an <Term id="idempotency-key">idempotency key</Term> gets a definition on hover or focus.
+
+## Figures and steps
+
+Diagrams are numbered automatically. <FigRef id="idempotent-retry" /> shows how a retried request is deduplicated.
+
+<Figure
+  id="idempotent-retry"
+  src="./figures/idempotent-retry.svg"
+  alt="The client sends a notification request; the API records the idempotency key in the dedup store and returns 202. A retry with the same key finds the existing key and returns 202 without sending again."
+  caption="An idempotent retry. The second `SET` finds the key and the API returns the original result."
+  width="wide"
+/>
+
+<Steps>
+1. The client sends `POST /v1/notifications` with an `Idempotency-Key` header.
+2. The API stores the key only if it does not already exist.
+3. The store reports that the key was created.
+4. The API accepts the request with `202 Accepted`.
+</Steps>
+
+<Aside>
+Margin notes hold tangents. On narrow screens they fall back inline, so they must never carry anything the main text depends on.
+</Aside>
+
+HTTP defines which methods are idempotent by specification <Cite href="https://www.rfc-editor.org/rfc/rfc9110" title="RFC 9110: HTTP Semantics" author="R. Fielding, M. Nottingham, J. Reschke" year="2022" />, while `POST` needs an application-level key <Cite href="https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/" title="The Idempotency-Key HTTP Header Field" author="IETF HTTPAPI Working Group" />.
+
+## Estimates and trade-offs [#estimates-and-tradeoffs]
+
+**Assumption:** 10M daily active users, 5 notifications per user per day, peak factor ×5.
+
+<Estimate title="Traffic">
+| Quantity       | Formula              | Result         |
+| -------------- | -------------------- | -------------- |
+| Daily sends    | 10M DAU × 5 / user   | 50M / day      |
+| Average rate   | 50M ÷ 86,400 s       | ≈ 580 msg/s    |
+| Peak rate (×5) | 580 × 5              | ≈ 2.9k msg/s   |
+</Estimate>
+
+<Tradeoffs>
+| Decision           | Chosen                 | Alternative   | Why                                              |
+| ------------------ | ---------------------- | ------------- | ------------------------------------------------ |
+| Delivery semantics | At-least-once + dedup  | Exactly-once  | Cheaper; an idempotency key makes retries safe   |
+| Dedup store        | Key-value with TTL     | Relational    | Single-key lookups; keys expire after 24 h       |
+</Tradeoffs>
+
+A plain Markdown table:
+
+| Percentile | Latency budget |
+| ---------- | -------------- |
+| p50        | 40 ms          |
+| p99        | 250 ms         |
+
+## Callouts
+
+<Callout type="note">A note adds context the reader may want.</Callout>
+
+<Callout type="tip" title="Custom title">A tip suggests a better way.</Callout>
+
+<Callout type="warning">A warning flags a sharp edge.</Callout>
+
+<Callout type="pitfall">A pitfall describes a mistake people make in production.</Callout>
+
+<Callout type="interview">How this topic tends to come up in a design interview.</Callout>
+
+## Code
+
+```ts title="dedup.ts" {3-5}
+export async function accept(key: string, send: () => Promise<void>) {
+  // SET NX with a TTL: only the first request with this key proceeds.
+  const created = await store.set(key, "1", { nx: true, ttlSeconds: 86_400 });
+  if (!created) return { status: 202, deduplicated: true };
+  await send();
+  return { status: 202, deduplicated: false };
+}
+```
+
+<Tabs>
+  <Tab label="Relational">
+
+```sql title="schema.sql"
+CREATE TABLE idempotency_keys (
+  key        TEXT PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+  </Tab>
+  <Tab label="Key-value">
+
+```text title="pseudocode"
+SET idem:{key} 1 NX EX 86400
+```
+
+  </Tab>
+</Tabs>
+
+### Third-level heading
+
+#### Fourth-level heading
+
+Lists, in both flavors:
+
+- Unordered item one
+- Unordered item two
+
+1. Ordered item one
+2. Ordered item two
+
+> A blockquote, used sparingly for quoting a source.

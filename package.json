@@ -1,0 +1,60 @@
+{
+  "name": "backend-mastery",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "next typegen && tsc --noEmit",
+    "lint": "eslint --max-warnings=0",
+    "lint:content": "tsx scripts/lint-content.ts",
+    "diagrams": "scripts/render-diagrams.sh",
+    "diagrams:check": "scripts/render-diagrams.sh --check",
+    "test": "vitest run",
+    "format": "prettier --write .",
+    "check": "pnpm typecheck && pnpm lint && pnpm lint:content && pnpm diagrams:check && pnpm test"
+  },
+  "packageManager": "pnpm@10.11.1",
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@content-collections/core": "0.15.3",
+    "@content-collections/mdx": "0.2.2",
+    "@content-collections/next": "0.2.11",
+    "github-slugger": "2.0.0",
+    "mdast-util-mdx": "3.0.0",
+    "mdast-util-mdx-jsx": "3.2.0",
+    "mdast-util-to-string": "4.0.0",
+    "next": "16.4.3",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "rehype-pretty-code": "0.14.5",
+    "remark-gfm": "4.0.1",
+    "remark-mdx": "3.1.1",
+    "remark-parse": "11.0.0",
+    "shiki": "4.5.0",
+    "unified": "11.0.5",
+    "unist-util-visit": "5.1.0",
+    "yaml": "2.9.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/turbopack": "^4.3.3",
+    "@types/hast": "3.0.5",
+    "@types/mdast": "4.0.4",
+    "@types/mdx": "2.0.14",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "16.4.3",
+    "prettier": "3.9.10",
+    "tailwindcss": "^4.3.3",
+    "tsx": "4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "5.0.5"
+  }
+}

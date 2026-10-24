@@ -217,20 +217,6 @@ Assume list prices: about $0.01 per SMS segment including carrier fees (Twilio's
 
 This changes the design more than any other number. SMS is 2% of our volume and about 94% of our provider spend ($200k of $213k a day). Real contracts are cheaper at this volume, but the ratio holds: every category that uses SMS must justify it, the channel-selection logic prefers push and in-app wherever the user allows them, and daily SMS spend gets an alert like any other service-level indicator. It also makes SMS the most attractive target for fraud, which we cover in [Security and privacy](#security-and-privacy).
 
-### At a glance
-
-Later sections refer back to these numbers.
-
-| Quantity                     | Value                                         |
-| ---------------------------- | --------------------------------------------- |
-| Notifications                | 1B per day; 58k per second at peak            |
-| Provider attempts at peak    | 63k per second                                |
-| Android sends at peak        | 1.56M per minute (FCM default: 600k)          |
-| SMS at peak                  | 1.2k per second                               |
-| Status writes at peak        | 232k per second                               |
-| Notification records         | 135 TB for 90 days, replicated                |
-| Provider spend               | about $213k per day, 94% of it SMS            |
-
 ## API design
 
 Producers talk to us in two ways. Synchronous HTTP suits request-driven flows such as login codes. Asynchronous events suit flows that already publish domain events ("order shipped"). Both paths land in the same request topics, so everything downstream is identical.
@@ -285,9 +271,17 @@ A few deliberate choices here:
 
 Campaigns return a `campaign_id` and are always asynchronous. Status queries are eventually consistent: a notification may show `queued` for a moment after the push has already arrived. That is acceptable for a status page and keeps the write path cheap.
 
-The inbox uses **cursor pagination**. The cursor encodes the last row's `(created_at, notification_id)`, so a page request is a single range read that stays correct while new notifications arrive at the top. Offset pagination would skip or repeat rows whenever the inbox grows between page loads, which on a busy account is always.
+The inbox loads one page at a time with **cursor pagination**. Each page comes back with a bookmark, the *cursor*, that remembers the last notification on it: its `created_at` and `notification_id`. "Load more" asks for the notifications that come after that bookmark, which the database answers with one quick read, and new notifications arriving at the top don't disturb it.
 
-Two smaller points. First, `recipient` can also be a raw address (`{ "email": "…" }`) for flows that happen before a user exists, such as invitations. Those bypass per-user preferences, because there is no user, but they still obey the global suppression list of bounced, complaining, and unsubscribed addresses. Second, the API enforces per-producer quotas and answers `429 Too Many Requests` when a producer exceeds them. That is the platform's <Term id="backpressure">backpressure</Term> toward producers: a runaway loop is throttled at the door rather than absorbed into the queue.
+The usual alternative, offset pagination ("skip the first 20, give me the next 20"), breaks on a live inbox. If two notifications arrive while the user reads page 1, every item shifts down by two, and page 2 starts by repeating the last two items of page 1. On a busy account, the inbox changes between almost every page load.
+
+<Aside title="Raw addresses and per-producer quotas">
+
+`recipient` can also be a raw address (`{ "email": "…" }`) for flows that happen before a user exists, such as invitations. Those bypass per-user preferences, because there is no user, but they still obey the global suppression list of bounced, complaining, and unsubscribed addresses.
+
+The API also enforces per-producer quotas and answers `429 Too Many Requests` when a producer exceeds them. That is the platform's <Term id="backpressure">backpressure</Term> toward producers: a runaway loop is throttled at the door rather than absorbed into the queue.
+
+</Aside>
 
 ## Data model
 
@@ -578,7 +572,7 @@ Because the id is derived rather than random, every repeat of every step produce
 
 At our 40k msg/s bulk budget, a 50M campaign takes about 21 minutes of send capacity. Time-zone bucketing helps here too: an audience spread across many offsets never needs all 50M sends in the same hour.
 
-<Aside>
+<Aside title="Who is in a campaign's audience">
 Segments are snapshotted when a fan-out job starts. A user who joins the segment ten minutes later is not included, and one who leaves is still sent to — unless they opted out, which the processor and the worker both check at send time regardless.
 </Aside>
 
@@ -604,7 +598,11 @@ The order of steps 2 to 4 is the whole point. Marking a row released *before* pu
 
 **How busy is a busy minute?** Assume 10% of notifications are held for later, about 100M a day, and that the largest group of users sharing one local release instant is 20% of the audience. Most users keep the default end of quiet hours, 07:00, so about 20M rows fall due at once. Without jitter, that is 20M rows in one minute — one hot partition, and a burst of 333k notifications per second into the lanes, nearly six times our peak. Spread over a 30-minute release window, it is about 670k rows per minute, or 11k per second; across 32 shards, about 21k rows per shard per minute, which one sweeper reads comfortably. **Jitter is not a nicety here, it is load management**, and the same applies to campaigns that every marketer schedules for 09:00 sharp: each time-zone cohort's job starts at a random point in a 15-minute window.
 
-Two details matter in practice. We store an IANA zone, not a fixed UTC offset, and resolve the local target near execution so daylight-saving and government rule changes are included. A transition can make "local 07:00" happen twice or not at all, so the resolver picks the earlier occurrence when it repeats and the first valid instant after it when it does not exist. If the user changes zones before resolution, the new zone wins; after a row is released, we do not move it. And when the sweeper falls behind, it processes due minutes oldest first, and a notification whose TTL has passed by the time it is released goes to `expired` rather than to a user who no longer needs it.
+<Aside title="Time zones and a sweeper that falls behind">
+
+We store an IANA zone, not a fixed UTC offset, and resolve the local target near execution so daylight-saving and government rule changes are included. A transition can make "local 07:00" happen twice or not at all, so the resolver picks the earlier occurrence when it repeats and the first valid instant after it when it does not exist. If the user changes zones before resolution, the new zone wins; after a row is released, we do not move it. And when the sweeper falls behind, it processes due minutes oldest first, and a notification whose TTL has passed by the time it is released goes to `expired` rather than to a user who no longer needs it.
+
+</Aside>
 
 ### Respecting the human [#respecting-the-human]
 
@@ -708,7 +706,11 @@ What a worker does *while* the breaker is open matters as much as opening it. Fa
 
 **Token hygiene.** Device tokens change when apps are reinstalled or restored, and die when apps are deleted. APNs answers a request for a dead token with HTTP `410` and reason `Unregistered` <Cite href="https://developer.apple.com/documentation/usernotifications/handling-notification-responses-from-apns" title="Handling notification responses from APNs" author="Apple" />; FCM's HTTP v1 API returns `UNREGISTERED`. The adapter looks the token up in `device_by_token` and deletes the device. Firebase also recommends treating tokens as stale when a device has not been active for a long period — over a month in their guidance — and pruning or refreshing them proactively, because sends to stale tokens waste quota and make delivery metrics look worse than they are <Cite href="https://firebase.google.com/docs/cloud-messaging/manage-tokens" title="Best practices for FCM registration token management" author="Firebase" />. Our `last_seen` column exists for exactly this.
 
-**The badge is a number we assert.** The `badge` value in an APNs payload is "the number to display" on the app icon, and `0` removes it <Cite href="https://developer.apple.com/documentation/usernotifications/generating-a-remote-notification" title="Generating a remote notification" author="Apple" />. It is not an increment. Whatever we send replaces what the user sees, so a drifted `unread_count` becomes a lie on the home screen. The worker includes a badge only when the cached count is fresh, recomputing it from `inbox_by_user` when it is older than a few minutes, and the app sets its own badge from the inbox whenever it opens. The server's number is a hint; the inbox is the truth.
+<Aside title="The app-icon badge is a number we assert">
+
+The `badge` value in an APNs payload is "the number to display" on the app icon, and `0` removes it <Cite href="https://developer.apple.com/documentation/usernotifications/generating-a-remote-notification" title="Generating a remote notification" author="Apple" />. It is not an increment. Whatever we send replaces what the user sees, so a drifted `unread_count` becomes a lie on the home screen. The worker includes a badge only when the cached count is fresh, recomputing it from `inbox_by_user` when it is older than a few minutes, and the app sets its own badge from the inbox whenever it opens. The server's number is a hint; the inbox is the truth.
+
+</Aside>
 
 **Webhooks are a distributed system too.** Provider callbacks are themselves delivered at least once and in no particular order: a "delivered" event can arrive before our own worker has recorded "sent", and the same "bounced" event can arrive three times. The tracking service therefore treats status as a one-way state machine (<FigRef id="notification-lifecycle" />). It applies an event only if it moves the delivery forward, so a late "sent" never overwrites "delivered", and a repeated event changes nothing. Webhook endpoints verify each provider's signature, acknowledge quickly, and push events onto a topic for processing, because a provider that sees slow responses from us will retry and make the backlog worse.
 

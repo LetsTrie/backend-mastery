@@ -29,7 +29,7 @@ references:
     url: https://www.enterpriseintegrationpatterns.com/
 revisions:
   - date: 2026-10-24
-    note: Estimates rewritten with each calculation beside its assumption; key takeaways and interview callouts removed.
+    note: Estimates rewritten with each calculation beside its assumption; key takeaways, interview callouts, and interviewer questions removed.
   - date: 2026-10-24
     note: First published.
 ---
@@ -866,16 +866,6 @@ We measure the system the way users experience it: per priority lane, per channe
 | Android collapse            | `tag` for the drawer, producer key for `collapse_key` | Unique `collapse_key` per notification | FCM keeps only four collapse keys per offline device                      |
 | Regions                     | Home region per user, async replication, epoch fencing | Synchronous cross-region writes | Seconds of RPO for most traffic; pay the latency only for categories that need it |
 </Tradeoffs>
-
-### Questions an interviewer will ask next
-
-- **"Why not WebSockets instead of push?"** A socket only reaches an app that is open. Push wakes a closed app through the platform's own channel, which is why both exist: the live connection is the in-app channel, push is for everything else, and the inbox is what they both read from.
-- **"What happens if the broker is down?"** The API returns `503` and nothing is lost, because producers hold their requests in their outbox and retry. The design refuses rather than lies. A team that cannot accept that for login codes adds an emergency direct path for the high lane only, and accepts that it bypasses every rule in the processor.
-- **"How would you test a change to the frequency-cap rules?"** Shadow mode: run the new rules beside the old on live traffic, log both decisions, send only the old. Then replay a day of the request topics through the new rules and diff the suppression log.
-- **"How would you add a new channel, such as WhatsApp?"** A new channel topic, worker, and provider adapter, plus one new row in the channel-selection matrix. Nothing upstream changes, which is the test of whether the channel abstraction is real.
-- **"What about a user with three devices?"** Push to every active device, and let a read on one clear the others with a silent push. The device registry's `last_seen` keeps "active" honest, and the capacity math counts device sends, not notifications.
-- **"How do you stop two regions from both sending?"** One home region per user at a time, recorded with an epoch; every send claim carries the epoch, and the store rejects stale ones.
-- **"Can you guarantee exactly-once?"** No, and neither can anyone whose side effect is an HTTP call to Apple. At-least-once with deduplication at every layer, plus an honest `indeterminate` for what nobody can know, is the right answer; see [reliable delivery](#reliable-delivery).
 
 ## Evolution
 

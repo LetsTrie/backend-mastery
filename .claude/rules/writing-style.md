@@ -71,8 +71,9 @@ Write so that a reader can:
 - Unsure? Write `TODO(verify): …` inline. Don't paper over gaps.
 - Never present an interview-style answer as "the" answer. Real designs have
   alternatives; show the one we chose and why.
-- No interview-coaching asides ("Scope it in the first five minutes…"). The
-  chapter teaches the design; readers preparing for interviews get that for free.
+- No interview-coaching asides ("Scope it in the first five minutes…") and no
+  "Questions an interviewer will ask" sections. The chapter teaches the design;
+  readers preparing for interviews get that for free.
 
 ## Code in chapters
 

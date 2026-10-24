@@ -252,6 +252,14 @@
   .prose em {
     font-style: italic;
   }
+  /* <Highlight>: a must-not-miss phrase. Solid accent underline, text color (links are accent text). */
+  .prose .highlight {
+    text-decoration: underline;
+    text-decoration-color: var(--color-accent);
+    text-decoration-thickness: 2px;
+    text-underline-offset: 0.22em;
+    text-decoration-skip-ink: auto;
+  }
 
   /* Lists */
   .prose :is(ul, ol) {

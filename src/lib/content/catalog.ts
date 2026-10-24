@@ -15,6 +15,7 @@ export const MDX_COMPONENTS = [
   "Tabs",
   "Tab",
   "Aside",
+  "Highlight",
 ] as const;
 
 export type MdxComponentName = (typeof MDX_COMPONENTS)[number];

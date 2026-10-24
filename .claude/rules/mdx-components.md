@@ -132,6 +132,13 @@ important content — the first tab must be sufficient on its own.
 </Tabs>
 ```
 
+### `<Highlight>`
+A must-not-miss phrase: bold with a solid accent underline. Use sparingly (a
+few per chapter); ordinary emphasis is `**bold**`.
+```mdx
+<Highlight>We integrate with providers</Highlight>: we do not run mail servers.
+```
+
 ### `<Aside>`
 Tangential but interesting; renders inline as a tinted note. Must not contain anything required to follow the main text.
 

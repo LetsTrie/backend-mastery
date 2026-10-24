@@ -12,6 +12,7 @@ import { CodeBlock } from "./code-block";
 import { Anchor, H2, H3, H4, Table } from "./elements";
 import { Estimate } from "./estimate";
 import { FigRef, Figure } from "./figure";
+import { Highlight } from "./highlight";
 import { KeyTakeaways } from "./key-takeaways";
 import { Steps } from "./steps";
 import { Tab, Tabs } from "./tabs";
@@ -36,6 +37,7 @@ export function getMdxComponents(chapter: Chapter): MDXComponents {
     Tradeoffs,
     Steps,
     Aside,
+    Highlight,
     Tabs,
     Tab,
     Figure: ({ id }: { id: string }) => <Figure figure={figure(id)} />,

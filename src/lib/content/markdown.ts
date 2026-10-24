@@ -119,6 +119,8 @@ function convertJsx(node: JsxElement, ctx: MarkdownContext): RootContent[] {
       const label = attr(node, "title") ?? CALLOUT_LABELS[isCalloutType(type) ? type : "note"];
       return labelledQuote(label, children());
     }
+    case "Highlight":
+      return [{ type: "strong", children: children() as never }];
     case "Aside":
       return labelledQuote("Aside", children());
     case "Estimate":

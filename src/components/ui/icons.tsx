@@ -24,6 +24,12 @@ const paths = {
       <circle cx="6" cy="18" r="1.25" fill="currentColor" stroke="none" />
     </>
   ),
+  user: (
+    <>
+      <circle cx="12" cy="8" r="3.75" />
+      <path d="M4.5 20a7.5 7.5 0 0 1 15 0" />
+    </>
+  ),
   clock: (
     <>
       <circle cx="12" cy="12" r="8.5" />

@@ -40,9 +40,9 @@ const features: { icon: IconName; title: string; text: string }[] = [
     text: "What breaks, how you notice, and what contains it, down to the region.",
   },
   {
-    icon: "interview",
-    title: "Interview notes",
-    text: "How each topic comes up in a design interview, and what strong answers sound like.",
+    icon: "tradeoffs",
+    title: "Trade-offs, defended",
+    text: "Every major decision next to the alternative we rejected, and the reason why.",
   },
 ];
 
@@ -77,14 +77,6 @@ function FeaturedChapter({ chapter }: { chapter: Chapter }) {
           <span className="inline-flex items-center gap-1.5">
             <Icon name="clock" size={15} />
             {chapter.readingMinutes} min read
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <Icon name="diagram" size={15} />
-            {chapter.figures.length} diagrams
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <Icon name="source" size={15} />
-            {chapter.citations.length} sources
           </span>
           <StatusBadge status={chapter.status} />
         </div>

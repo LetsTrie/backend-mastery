@@ -67,12 +67,9 @@
   .reading-grid > * {
     grid-column: text;
   }
+  /* Only diagrams break out wider; tables and code share the paragraph width. */
   .reading-grid > .bleed-wide,
-  .reading-grid > [data-width="wide"],
-  .reading-grid > .table-scroll,
-  .reading-grid > .estimate,
-  .reading-grid > .tradeoffs,
-  .reading-grid > [data-rehype-pretty-code-figure] {
+  .reading-grid > [data-width="wide"] {
     grid-column: wide;
   }
   .reading-grid > [data-width="full"] {
@@ -130,6 +127,13 @@
   .chapter-meta svg {
     color: var(--color-subtle);
   }
+  .chapter-author {
+    font-weight: 600;
+    color: var(--color-text);
+  }
+  .chapter-author a:hover {
+    color: var(--color-accent);
+  }
   .notice {
     display: flex;
     gap: 0.75rem;
@@ -170,7 +174,7 @@
 
   /* Opening paragraph: a three-line drop cap where the browser supports it. */
   @supports (initial-letter: 3) or (-webkit-initial-letter: 3) {
-    .prose > .key-takeaways + p::first-letter {
+    .prose > p:first-of-type::first-letter {
       -webkit-initial-letter: 3;
       initial-letter: 3;
       margin-inline-end: 0.6rem;

@@ -29,12 +29,6 @@ function ChapterRow({ chapter }: { chapter: Chapter }) {
             <Icon name="clock" size={15} />
             {chapter.readingMinutes} min read
           </span>
-          {chapter.figures.length > 0 ? (
-            <span className="inline-flex items-center gap-1.5">
-              <Icon name="diagram" size={15} />
-              {chapter.figures.length} diagrams
-            </span>
-          ) : null}
           <StatusBadge status={chapter.status} />
         </div>
       </div>

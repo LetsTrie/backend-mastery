@@ -150,17 +150,8 @@ export default async function ChapterPage({ params }: PageProps<"/chapters/[slug
             {part ? ` · ${part.title}` : null}
             {number ? ` · Chapter ${number}` : null}
           </p>
-          <nav aria-label="Breadcrumb" className="breadcrumb print-hide">
-            <Link href="/chapters">Chapters</Link>
-            {part ? (
-              <>
-                <span aria-hidden="true">/</span>
-                <Link href={`/parts/${part.key}`}>{part.title}</Link>
-              </>
-            ) : null}
-          </nav>
           {number ? (
-            <p className="eyebrow mt-8 print-hide">
+            <p className="eyebrow print-hide">
               Chapter {String(number).padStart(2, "0")}
               {chapter.kind === "case-study" ? <span className="text-subtle">· Case study</span> : null}
             </p>
@@ -169,33 +160,21 @@ export default async function ChapterPage({ params }: PageProps<"/chapters/[slug
           <p className="lede mt-5 text-xl">{chapter.subtitle}</p>
 
           <div className="chapter-meta">
-            {authors.length > 0 ? <span>By {authors.map((a) => a.name).join(", ")}</span> : null}
-            <span className="print-hide">
-              <Icon name="clock" size={16} />
-              {chapter.readingMinutes} min read
-            </span>
-            {chapter.figures.length > 0 ? (
-              <span className="print-hide">
-                <Icon name="diagram" size={16} />
-                {chapter.figures.length} diagrams
+            {authors.map((author) => (
+              <span key={author.key} className="chapter-author">
+                <Icon name="user" size={16} />
+                {author.url ? <a href={author.url}>{author.name}</a> : author.name}
               </span>
-            ) : null}
-            {chapter.citations.length > 0 ? (
-              <span className="print-hide">
-                <Icon name="source" size={16} />
-                {chapter.citations.length} sources
-              </span>
-            ) : null}
+            ))}
             {chapter.published ? (
               <span>
                 <Icon name="calendar" size={16} />
                 <time dateTime={chapter.published}>{formatDate(chapter.published)}</time>
               </span>
             ) : null}
-            <span>
-              {chapter.published ? null : <Icon name="calendar" size={16} />}
-              {chapter.published ? "Updated " : "Last updated "}
-              <time dateTime={chapter.updated}>{formatDate(chapter.updated)}</time>
+            <span className="print-hide">
+              <Icon name="clock" size={16} />
+              {chapter.readingMinutes} min read
             </span>
             <span className="print-hide">
               <StatusBadge status={chapter.status} />

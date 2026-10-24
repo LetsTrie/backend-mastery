@@ -36,7 +36,7 @@ const chapterObject = z.object({
   subtitle: z.string().min(1).max(110),
   description: z.string().min(120).max(160),
   part: kebab,
-  tags: z.array(kebab).max(6).default([]),
+  tags: z.array(kebab).max(10).default([]),
   prerequisites: z.array(kebab).default([]),
   status: z.enum(chapterStatuses),
   authors: z.array(kebab).default([]),

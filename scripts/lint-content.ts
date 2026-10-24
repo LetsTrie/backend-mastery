@@ -194,9 +194,6 @@ for (const folder of folders) {
     const actual = h2.filter((id) => blueprint.includes(id));
     if (!missing.length && order.join() !== actual.join()) report("error", shown, "blueprint", "## sections are out of blueprint order");
   }
-  if (chapter.kind !== "essay" && !analysis.jsx.some((j) => j.name === "KeyTakeaways")) {
-    report("error", shown, "blueprint", "missing <KeyTakeaways>");
-  }
 
   // Figures
   const figureIds = new Set<string>();

@@ -173,3 +173,19 @@ exactly-once-delivery:
 global-ordering:
   term: Global ordering
   definition: A guarantee that every message is processed in the exact order it was created, across the whole system. It forces everything through one sequence, which limits scale.
+
+template-versioning:
+  term: Versioned template
+  definition: A message template whose every change is saved as a new numbered version. Each notification records the version it used, so an edit never changes messages already queued and a bad edit can be rolled back.
+
+localization:
+  term: Localization
+  definition: Adapting a message to the reader's language and region, including translation, date and number formats, and time zones.
+
+personalization:
+  term: Personalization (per-user data)
+  definition: Filling a template's placeholders with values for one recipient, such as their name, order number, or one-time code, at the moment the message is rendered.
+
+replay:
+  term: Replay
+  definition: Processing the same message a second time, for example when a worker crashes after doing the work but before recording that it finished. A replay carries the same notification id, so the system can recognize and drop it.

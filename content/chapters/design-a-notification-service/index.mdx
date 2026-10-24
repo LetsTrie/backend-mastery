@@ -60,9 +60,9 @@ We are building an internal platform. Other teams' services, which we call **pro
 1. A producer can send a notification to one user, either by calling an API or by publishing an event.
 2. A producer can launch a campaign to a segment of up to 50M users, immediately or on a schedule.
 3. Users control which categories they receive on which channels, set quiet hours, and have a time zone. An opt-out takes effect for every notification not yet handed to a provider, including ones already queued or scheduled.
-4. Notifications are rendered from versioned, localized templates with per-user data.
+4. Notifications are rendered from <Term id="template-versioning">versioned</Term>, <Term id="localization">localized</Term> templates with <Term id="personalization">per-user data</Term>.
 5. Producers can query the delivery status of any notification they sent; users can page through their in-app inbox.
-6. The platform enforces per-user frequency caps. It recognizes and drops deterministic internal replays, and keeps the duplicates a user can see rare.
+6. The platform enforces per-user <Term id="frequency-cap">frequency caps</Term>. It always catches the exact repeats our own system creates when it <Term id="replay">reprocesses a message</Term>, and keeps the duplicates a user could actually see rare: a few can slip through when a provider's reply is lost (see [reliable delivery](#reliable-delivery)).
 
 ### Non-functional
 

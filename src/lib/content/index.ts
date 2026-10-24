@@ -86,6 +86,39 @@ export function getPart(key: string): Part | undefined {
   return getParts().find((part) => part.key === key);
 }
 
+/** Display title for a planned chapter that has no file yet: "design-a-rate-limiter" → "Design a rate limiter". */
+function titleFromSlug(slug: string): string {
+  const words = slug.split("-").join(" ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+export type PlannedChapter = { slug: string; title: string };
+
+/** The part's roadmap: planned slugs that are not yet written chapters, in order. */
+export function getPlanned(part: Part): PlannedChapter[] {
+  const written = new Set(allChapters.map((c) => c.slug));
+  return part.planned
+    .filter((slug) => !written.has(slug))
+    .map((slug) => ({ slug, title: titleFromSlug(slug) }));
+}
+
+/** Roman numeral for a part's position (1 → "I"); parts are few, so a lookup suffices. */
+export function partNumeral(key: string): string {
+  const index = book.parts.findIndex((part) => part.key === key);
+  return ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"][index] ?? String(index + 1);
+}
+
+/** Totals for the home page, counted over listed chapters only. */
+export function getBookStats() {
+  const chapters = getChapters();
+  return {
+    chapters: chapters.length,
+    figures: chapters.reduce((sum, c) => sum + c.figures.length, 0),
+    sources: chapters.reduce((sum, c) => sum + c.citations.length + c.references.length, 0),
+    planned: getParts().reduce((sum, part) => sum + getPlanned(part).length, 0),
+  };
+}
+
 export function getTags(): Map<string, Chapter[]> {
   const tags = new Map<string, Chapter[]>();
   for (const chapter of getChapters()) {

@@ -3,6 +3,9 @@
 @import "../styles/article.css";
 @import "../styles/print.css";
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Base
+   ───────────────────────────────────────────────────────────────────────── */
 @layer base {
   html {
     background: var(--color-bg);
@@ -10,6 +13,16 @@
     font-family: var(--font-ui);
     -webkit-text-size-adjust: 100%;
     text-rendering: optimizeLegibility;
+    scroll-padding-top: calc(var(--header-height) + 1.5rem);
+    scrollbar-gutter: stable;
+    scrollbar-color: var(--color-border-strong) transparent;
+    accent-color: var(--color-accent);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    html {
+      scroll-behavior: smooth;
+    }
   }
 
   body {
@@ -23,16 +36,17 @@
 
   a {
     color: inherit;
+    text-decoration: none;
   }
 
   :focus-visible {
     outline: 2px solid var(--color-accent);
-    outline-offset: 2px;
-    border-radius: 2px;
+    outline-offset: 3px;
+    border-radius: 4px;
   }
 
   ::selection {
-    background: color-mix(in oklab, var(--color-accent) 25%, transparent);
+    background: color-mix(in oklab, var(--color-accent) 22%, transparent);
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -46,12 +60,22 @@
   }
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Shared components (site chrome and pages)
+   ───────────────────────────────────────────────────────────────────────── */
 @layer components {
+  .container-page {
+    width: 100%;
+    max-width: var(--width-page);
+    margin-inline: auto;
+    padding-inline: clamp(1rem, 4vw, 2rem);
+  }
+
   .skip-link {
     position: absolute;
     left: 1rem;
     top: -4rem;
-    z-index: 50;
+    z-index: 60;
     padding: 0.5rem 1rem;
     background: var(--color-accent);
     color: var(--color-accent-contrast);
@@ -61,25 +85,434 @@
     top: 1rem;
   }
 
+  /* Text link inside UI copy. */
   .link {
     color: var(--color-accent);
     text-decoration: underline;
+    text-decoration-color: color-mix(in oklab, var(--color-accent) 40%, transparent);
     text-decoration-thickness: 1px;
-    text-underline-offset: 0.2em;
+    text-underline-offset: 0.22em;
+    transition: text-decoration-color var(--duration-fast) var(--ease-out);
   }
   .link:hover {
-    text-decoration-thickness: 2px;
+    text-decoration-color: currentColor;
   }
 
-  .badge {
+  /* Small uppercase label above a heading. */
+  .eyebrow {
     display: inline-flex;
     align-items: center;
-    padding: 0.0625rem 0.5rem;
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
+    gap: 0.5rem;
     font-family: var(--font-ui);
     font-size: var(--text-xs);
+    font-weight: 600;
+    letter-spacing: var(--tracking-label);
+    text-transform: uppercase;
+    color: var(--color-accent);
+  }
+
+  .display {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-optical-sizing: auto;
+    letter-spacing: var(--tracking-display);
+    line-height: var(--leading-tight);
+    text-wrap: balance;
+  }
+
+  .lede {
+    font-family: var(--font-body);
+    font-size: var(--text-lg);
+    line-height: 1.45;
+    color: var(--color-muted);
+    text-wrap: pretty;
+  }
+
+  /* Chips and badges */
+  .badge,
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    height: 1.625rem;
+    padding-inline: 0.625rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-full);
+    background: var(--color-bg);
+    font-family: var(--font-ui);
+    font-size: var(--text-xs);
+    font-weight: 500;
     color: var(--color-muted);
     white-space: nowrap;
+    transition:
+      color var(--duration-fast) var(--ease-out),
+      border-color var(--duration-fast) var(--ease-out),
+      background-color var(--duration-fast) var(--ease-out);
+  }
+  a.chip:hover {
+    color: var(--color-text);
+    border-color: var(--color-border-strong);
+    background: var(--color-surface);
+  }
+  .status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    height: 1.625rem;
+    padding-inline: 0.625rem;
+    border-radius: var(--radius-full);
+    background: color-mix(in oklab, var(--color-warning) 12%, var(--color-bg));
+    color: color-mix(in oklab, var(--color-warning) 85%, var(--color-text));
+    font-family: var(--font-ui);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    text-transform: capitalize;
+  }
+  .status::before {
+    content: "";
+    width: 0.4rem;
+    height: 0.4rem;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .status[data-status="planned"] {
+    background: var(--color-surface);
+    color: var(--color-muted);
+  }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    height: 2.75rem;
+    padding-inline: 1.25rem;
+    border-radius: var(--radius-full);
+    font-family: var(--font-ui);
+    font-size: var(--text-md);
+    font-weight: 600;
+    white-space: nowrap;
+    transition:
+      background-color var(--duration-fast) var(--ease-out),
+      border-color var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out),
+      box-shadow var(--duration-fast) var(--ease-out);
+  }
+  .btn svg {
+    transition: transform var(--duration-base) var(--ease-out);
+  }
+  .btn:hover svg {
+    transform: translateX(2px);
+  }
+  .btn-primary {
+    background: var(--color-text);
+    color: var(--color-bg);
+    box-shadow: var(--shadow-sm);
+  }
+  .btn-primary:hover {
+    background: color-mix(in oklab, var(--color-text) 86%, var(--color-accent));
+    box-shadow: var(--shadow-md);
+  }
+  .btn-secondary {
+    border: 1px solid var(--color-border-strong);
+    background: var(--color-bg);
+    color: var(--color-text);
+  }
+  .btn-secondary:hover {
+    background: var(--color-surface);
+  }
+
+  .icon-button {
+    display: inline-grid;
+    place-items: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: var(--radius-full);
+    color: var(--color-muted);
+    transition:
+      color var(--duration-fast) var(--ease-out),
+      background-color var(--duration-fast) var(--ease-out);
+  }
+  .icon-button:hover {
+    color: var(--color-text);
+    background: var(--color-surface);
+  }
+
+  /* Cards */
+  .card {
+    position: relative;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-bg);
+    transition:
+      border-color var(--duration-base) var(--ease-out),
+      box-shadow var(--duration-base) var(--ease-out),
+      transform var(--duration-base) var(--ease-out);
+  }
+  .card-link:hover {
+    border-color: var(--color-border-strong);
+    box-shadow: var(--shadow-lg);
+    transform: translateY(-2px);
+  }
+  /* The whole card is clickable through its title link. */
+  .card-link .card-cover::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+  }
+
+  /* Section heading on index pages. */
+  .section-label {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    font-family: var(--font-ui);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    letter-spacing: var(--tracking-label);
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+  .section-label::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--color-border);
+  }
+
+  /* ── Site header ───────────────────────────────────────────────────── */
+  .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    height: var(--header-height);
+    background: color-mix(in oklab, var(--color-bg) 82%, transparent);
+    backdrop-filter: saturate(180%) blur(14px);
+    -webkit-backdrop-filter: saturate(180%) blur(14px);
+    border-bottom: 1px solid transparent;
+  }
+  /* Hairline appears once the page scrolls (progressive enhancement). */
+  @supports (animation-timeline: scroll()) {
+    .site-header {
+      animation: header-edge linear both;
+      animation-timeline: scroll(root block);
+      animation-range: 0 3rem;
+    }
+  }
+  @supports not (animation-timeline: scroll()) {
+    .site-header {
+      border-bottom-color: var(--color-border);
+    }
+  }
+  @keyframes header-edge {
+    to {
+      border-bottom-color: var(--color-border);
+    }
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.65rem;
+    font-family: var(--font-display);
+    font-size: 1.125rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+  }
+  .logo-mark {
+    border-radius: 8px;
+    box-shadow: var(--shadow-sm);
+    transition: transform var(--duration-base) var(--ease-out);
+  }
+  .brand:hover .logo-mark {
+    transform: rotate(-6deg);
+  }
+
+  .nav-link {
+    display: inline-flex;
+    align-items: center;
+    height: 2.25rem;
+    padding-inline: 0.85rem;
+    border-radius: var(--radius-full);
+    font-size: var(--text-md);
+    font-weight: 500;
+    color: var(--color-muted);
+    transition:
+      color var(--duration-fast) var(--ease-out),
+      background-color var(--duration-fast) var(--ease-out);
+  }
+  .nav-link:hover,
+  .nav-link[aria-current="page"] {
+    color: var(--color-text);
+    background: var(--color-surface);
+  }
+
+  /* Reading progress: a hairline that fills as the chapter scrolls. */
+  .reading-progress {
+    position: fixed;
+    inset: var(--header-height) 0 auto 0;
+    z-index: 39;
+    height: 2px;
+    background: var(--color-accent);
+    transform-origin: 0 50%;
+    transform: scaleX(0);
+    display: none;
+  }
+  @supports (animation-timeline: scroll()) {
+    .reading-progress {
+      display: block;
+      animation: reading-progress linear both;
+      animation-timeline: scroll(root block);
+    }
+  }
+  @keyframes reading-progress {
+    to {
+      transform: scaleX(1);
+    }
+  }
+
+  /* ── Site footer ───────────────────────────────────────────────────── */
+  .site-footer {
+    margin-top: 8rem;
+    border-top: 1px solid var(--color-border);
+    background: var(--color-surface);
+  }
+  .footer-heading {
+    margin-bottom: 0.9rem;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    letter-spacing: var(--tracking-label);
+    text-transform: uppercase;
+    color: var(--color-text);
+  }
+  .footer-link {
+    color: var(--color-muted);
+    font-size: var(--text-md);
+    transition: color var(--duration-fast) var(--ease-out);
+  }
+  .footer-link:hover {
+    color: var(--color-text);
+  }
+
+  /* ── Home hero backdrop: a quiet dot grid that fades out ─────────── */
+  .hero-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background-image: radial-gradient(
+      color-mix(in oklab, var(--color-text) 14%, transparent) 1px,
+      transparent 1.2px
+    );
+    background-size: 22px 22px;
+    mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, #000 30%, transparent 75%);
+    pointer-events: none;
+  }
+  .hero-glow {
+    position: absolute;
+    inset: -10% 10% auto;
+    z-index: -1;
+    height: 26rem;
+    background: radial-gradient(
+      closest-side,
+      color-mix(in oklab, var(--color-accent) 16%, transparent),
+      transparent
+    );
+    filter: blur(40px);
+    pointer-events: none;
+  }
+
+  /* Featured chapter preview: a figure framed like a page, fading at the bottom. */
+  .preview-frame {
+    position: relative;
+    overflow: hidden;
+    border-radius: var(--radius-md);
+    background: var(--color-figure);
+    border: 1px solid var(--color-border);
+  }
+  .preview-frame img {
+    width: 100%;
+    height: auto;
+  }
+  .preview-frame::after {
+    content: "";
+    position: absolute;
+    inset: auto 0 0 0;
+    height: 40%;
+    background: linear-gradient(transparent, var(--color-figure));
+  }
+
+  /* Light/dark image pairs outside articles (featured previews). */
+  .theme-img--dark {
+    display: none;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .theme-img--light {
+      display: none;
+    }
+    :root:not([data-theme="light"]) .theme-img--dark {
+      display: block;
+    }
+  }
+  :root[data-theme="dark"] .theme-img--light {
+    display: none;
+  }
+  :root[data-theme="dark"] .theme-img--dark {
+    display: block;
+  }
+
+  /* Chapter rows on index pages. */
+  .chapter-row {
+    position: relative;
+    display: grid;
+    grid-template-columns: 2.75rem minmax(0, 1fr);
+    gap: 0.25rem 1rem;
+    padding-block: 1.4rem;
+    border-bottom: 1px solid var(--color-border);
+  }
+  @media (min-width: 40rem) {
+    .chapter-row {
+      grid-template-columns: 3.5rem minmax(0, 1fr) auto;
+      align-items: baseline;
+    }
+  }
+  .chapter-row-number {
+    font-family: var(--font-display);
+    font-size: 1.375rem;
+    font-weight: 500;
+    font-variant-numeric: lining-nums tabular-nums;
+    color: var(--color-subtle);
+  }
+  .chapter-row-title {
+    font-family: var(--font-display);
+    font-size: var(--text-lg);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: var(--leading-snug);
+    transition: color var(--duration-fast) var(--ease-out);
+  }
+  .chapter-row-title a::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+  }
+  .chapter-row:has(a:hover) .chapter-row-title {
+    color: var(--color-accent);
+  }
+  .chapter-row:has(a:hover) .chapter-row-arrow {
+    transform: translateX(3px);
+    color: var(--color-accent);
+  }
+  .chapter-row-arrow {
+    color: var(--color-subtle);
+    transition:
+      transform var(--duration-base) var(--ease-out),
+      color var(--duration-fast) var(--ease-out);
+  }
+  .chapter-row[data-planned] .chapter-row-title {
+    font-weight: 500;
+    color: var(--color-muted);
   }
 }

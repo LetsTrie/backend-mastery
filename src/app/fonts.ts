@@ -1,22 +1,25 @@
-import { Inter, JetBrains_Mono, Source_Serif_4 } from "next/font/google";
+import { Geist, Geist_Mono, Newsreader } from "next/font/google";
 
 // Self-hosted at build time by next/font. Max two families + mono (design-system rules).
-export const sourceSerif = Source_Serif_4({
+
+/** Reading and display serif; the opsz axis gives text and display cuts from one family. */
+export const newsreader = Newsreader({
   subsets: ["latin"],
-  variable: "--font-source-serif",
+  variable: "--font-newsreader",
   style: ["normal", "italic"],
   axes: ["opsz"],
   display: "swap",
 });
 
-export const inter = Inter({
+/** Interface sans: navigation, labels, tables, captions. */
+export const geist = Geist({
   subsets: ["latin"],
-  variable: "--font-inter",
+  variable: "--font-geist",
   display: "swap",
 });
 
-export const jetbrainsMono = JetBrains_Mono({
+export const geistMono = Geist_Mono({
   subsets: ["latin"],
-  variable: "--font-jetbrains-mono",
+  variable: "--font-geist-mono",
   display: "swap",
 });

@@ -12,65 +12,101 @@ a trend. When in doubt, remove.
 ## Principles
 
 1. **Typography is the design.** Most of the page is text; it must be beautiful.
+   Newsreader for headlines and reading text; Geist for interface only.
 2. **Quiet chrome.** Navigation and UI recede; content and figures lead.
-3. **Semantic color.** Color carries meaning (link, focus, warning, failure).
-   Never decorative gradients, glows, or glassmorphism.
+3. **Semantic color.** Color carries meaning (link, focus, state, failure). One
+   accent (ember). Decoration is rare and quiet, and never inside reading content:
+   the home hero may use its dot grid and soft glow; the sticky header may be
+   translucent with a backdrop blur. Chapter bodies get tints, not gradients or glows.
 4. **Tokens, not values.** Components never hard-code a color, size, or spacing.
+5. **Modern CSS, progressively enhanced.** Use the platform: `light-dark()`, OKLCH,
+   `color-mix()`, `:has()`, `text-wrap`, `initial-letter`, scroll-driven animations.
+   Every enhancement is behind `@supports` (or degrades harmlessly) so older
+   browsers get a complete, plain page.
 
 ## Tokens (`src/styles/tokens.css`)
 
 All design values are CSS custom properties, exposed to Tailwind v4 via `@theme`.
-Dark mode overrides the same tokens under `[data-theme="dark"]` and
-`prefers-color-scheme: dark`.
+Each color is declared **once** with `light-dark(light, dark)` in OKLCH; the active
+value follows `color-scheme`, which comes from the OS or from the reader's choice
+(`[data-theme]`). Print overrides the same names in `src/styles/print.css`, so
+never rename a token without updating print.
 
-- **Color:** `--color-bg`, `--color-surface`, `--color-surface-strong`,
-  `--color-text`, `--color-muted`, `--color-border`, `--color-accent`,
-  `--color-accent-contrast`, `--color-note`, `--color-tip`, `--color-warning`,
-  `--color-danger`, `--color-code-bg`, `--color-diagram-accent`,
-  `--color-diagram-danger`. Tailwind's default palette is removed
-  (`--color-*: initial`), so `bg-bg`, `text-muted`, `border-border` are the only
-  color utilities. Warm-gray neutrals, a single accent hue. Diagram palettes in
-  `content/_shared/d2/palette-*.d2` mirror these tokens — change both together.
-- **Type:** Source Serif 4 (body), Inter (UI and headings), JetBrains Mono (code),
-  self-hosted via `next/font` in `src/app/fonts.ts`. Utilities: `font-body`,
-  `font-ui`, `font-mono`. Fluid scale `--text-xs` … `--text-3xl` with `clamp()`;
-  body 17–19 px, line-height 1.7.
-- **Space:** Tailwind's 4 px base unit (`--spacing`; `p-1` = 4 px … `p-16` = 64 px).
-- **Radius:** small and consistent (`--radius-sm`, `--radius-md`). No pills
-  except tags.
+- **Neutrals:** `--color-bg`, `--color-surface`, `--color-surface-strong`,
+  `--color-text`, `--color-muted`, `--color-subtle` (decoration only, never body
+  text), `--color-border`, `--color-border-strong`.
+- **Accent:** `--color-accent`, `--color-accent-strong`, `--color-accent-soft`
+  (tinted fills), `--color-accent-contrast` (text on accent).
+- **Semantic:** `--color-note`, `--color-tip`, `--color-warning`, `--color-danger`.
+- **Code and figures:** `--color-code-bg`; `--color-figure` must equal N7 in
+  `content/_shared/d2/palette-*.d2` so diagrams sit seamlessly in their frames.
+  `--color-diagram-accent` / `--color-diagram-danger` mirror the D2 classes.
+- Tailwind's default palette is removed (`--color-*: initial`), so utilities like
+  `bg-bg`, `text-muted`, `border-border`, `bg-accent-soft` are the only colors.
+- **Type:** Newsreader for body and display (`--font-body`, `--font-display`,
+  optical sizes on), Geist for interface (`--font-ui`), Geist Mono for code
+  (`--font-mono`). Self-hosted via `next/font` in `src/app/fonts.ts`. Fluid scale
+  `--text-xs` … `--text-4xl` with `clamp()`; restrained sizes: body 16–18 px,
+  UI text 13–14 px, line-height 1.6, measure 76ch (≈ 750 px at 18 px).
+  Labels: uppercase, `--tracking-label`. Display: `--tracking-display`.
+- **Space:** Tailwind's 4 px base unit (`--spacing`).
+- **Radius:** `--radius-sm` (6), `--radius-md` (10), `--radius-lg` (16),
+  `--radius-full` for buttons, chips, and status pills.
+- **Elevation:** `--shadow-sm` / `--shadow-md` / `--shadow-lg`, soft and layered,
+  reserved for hover, popovers, and floating controls.
+- **Motion:** `--ease-out`, `--duration-fast` (140 ms), `--duration-base` (220 ms).
 
-## Layout: the reading grid
+## Layout
 
-Implemented in `src/styles/article.css` (`.reading-grid`, `.prose`, component styles).
-
-A named-line CSS grid on the article:
+- Page container: `.container-page` (max `--width-page`, 84rem, fluid side padding).
+  The header, footer, and chapter layout share this width so the logo, sidebar,
+  and content edges line up.
+- The article is a named-line CSS grid (`src/styles/article.css`):
 
 ```
 | full | wide | text (≈ 68ch) | wide | full |
 ```
 
-- Prose sits in `text` (60–75 characters per line).
-- `<Figure width="wide">` and tables break out to `wide`; `full` is rare
-  (very large architecture overviews).
-- `<Aside>` uses the right margin on ≥ 1280 px, inline below.
-- Table of contents: sticky left rail on ≥ 1280 px with scroll-spy; a
-  collapsible "On this page" at the top on smaller screens.
+- Prose sits in `text`. `<Figure width="wide">`, tables, estimates, trade-offs,
+  and code break out to `wide`; `full` is rare.
+- Beside the sidebar the reading grid is asymmetric: a small fixed gap on the
+  left, spare room on the right for margin notes. `--breakout` is 4.5rem.
+- `<Aside>` hangs in the right margin on ≥ 1408 px (9.5rem wide), inline below.
+- Table of contents: sticky left rail on ≥ 1280 px, separated from the content
+  by a 1 px right border, with scroll-spy (the active section is the last heading
+  scrolled past); collapsible "On this page" below.
+- Header height is `--header-height`; anchors use `scroll-padding-top`, never
+  per-element offsets.
+
+## Shared components (`src/app/globals.css`)
+
+`.btn` + `.btn-primary` / `.btn-secondary`, `.icon-button`, `.chip`/`.badge`,
+`.status`, `.eyebrow`, `.display`, `.lede`, `.card` (+ `.card-link`, `.card-cover`
+for whole-card links), `.section-label`, `.chapter-row`, `.nav-link`,
+`.reading-progress`. Reuse these before writing new styles.
 
 ## Chapter page anatomy
 
-1. Breadcrumb (Part › Chapter) · title · subtitle · meta line
-   (authors, published/updated date, reading time, tags).
-2. `<KeyTakeaways>`.
-3. Body with TOC rail.
-4. Prerequisites + "Used in" links, previous/next chapter in reading order.
-5. References, revision history, "Edit on GitHub" / report an error link.
+1. Breadcrumb (Chapters / Part) · eyebrow (chapter number, kind) · title · subtitle.
+2. Meta strip: reading time, diagrams, sources, dates, status; topic chips;
+   a quiet notice for draft, review, or archived.
+3. `<KeyTakeaways>`, then the body. Blueprint `##` sections are numbered (01, 02…)
+   by CSS counters; the first paragraph gets a drop cap where supported.
+4. End matter: related chapters (chips), references, revision history, how to
+   cite, edit/report links, previous/next cards.
+5. A reading-progress hairline under the header (scroll-driven; absent where
+   unsupported).
 
 ## Components
 
 - Every component has: default, hover, focus-visible, and dark states.
 - Focus rings always visible (`:focus-visible`), 2 px, accent color, offset.
-- Motion: only to clarify (e.g. TOC highlight). Respect `prefers-reduced-motion`.
-- Icons: one icon set, outline style, used sparingly and always with a label.
+- Motion only clarifies or responds to the reader (hover, scroll position, TOC
+  marker). Nothing animates on its own. Respect `prefers-reduced-motion`.
+- Icons: the set in `src/components/ui/icons.tsx` (24 px grid, 1.75 stroke,
+  currentColor). Decorative icons are `aria-hidden`; icon-only buttons get a label.
+- Hidden overlays (tooltips) use `display: none`, never `visibility: hidden`, so
+  they cannot create page overflow.
 
 ## Print and PDF
 

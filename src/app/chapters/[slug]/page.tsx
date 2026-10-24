@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { getMdxComponents } from "@/components/mdx";
 import { StatusBadge } from "@/components/ui/chapter-list";
 import { HowToCite } from "@/components/ui/how-to-cite";
+import { Icon } from "@/components/ui/icons";
 import { PrintPrep } from "@/components/ui/print-prep";
 import { TocInline, TocRail } from "@/components/ui/toc";
 import { chapterCitation } from "@/lib/cite";
@@ -93,9 +94,15 @@ function articleJsonLd(chapter: Chapter) {
 
 function ChapterLink({ slug }: { slug: string }) {
   const target = getChapter(slug);
-  if (!target) return <span className="text-muted">{slug} (coming soon)</span>;
+  if (!target) {
+    return (
+      <span className="chip" title="Not written yet">
+        {slug.split("-").join(" ")} · soon
+      </span>
+    );
+  }
   return (
-    <Link href={`/chapters/${target.slug}`} className="link">
+    <Link href={`/chapters/${target.slug}`} className="chip">
       {target.title}
     </Link>
   );
@@ -120,11 +127,12 @@ export default async function ChapterPage({ params }: PageProps<"/chapters/[slug
 
   return (
     <div className="chapter-layout">
-      <aside className="toc-rail">
+      <div className="reading-progress print-hide" aria-hidden="true" />
+      <aside className="toc-rail print-hide">
         <TocRail items={toc} />
       </aside>
 
-      <article className="reading-grid prose pt-10 sm:pt-16">
+      <article className="reading-grid prose">
         {/* Running header for printed pages (see src/styles/print.css). */}
         <style>{`@media print { @page { @top-left { content: ${JSON.stringify(
           `${site.name} · ${chapter.title}`,
@@ -136,62 +144,92 @@ export default async function ChapterPage({ params }: PageProps<"/chapters/[slug
           }}
         />
 
-        <header className="font-ui">
+        <header className="chapter-hero font-ui">
           <p className="print-only chapter-kicker">
             {site.name}
             {part ? ` · ${part.title}` : null}
             {number ? ` · Chapter ${number}` : null}
           </p>
-          <nav aria-label="Breadcrumb" className="print-hide text-sm text-muted">
-            <Link href="/chapters" className="hover:text-text">
-              Chapters
-            </Link>
+          <nav aria-label="Breadcrumb" className="breadcrumb print-hide">
+            <Link href="/chapters">Chapters</Link>
             {part ? (
               <>
-                {" › "}
-                <Link href={`/parts/${part.key}`} className="hover:text-text">
-                  {part.title}
-                </Link>
+                <span aria-hidden="true">/</span>
+                <Link href={`/parts/${part.key}`}>{part.title}</Link>
               </>
             ) : null}
-            {number ? <> · Chapter {number}</> : null}
           </nav>
-          <h1 className="mt-4 font-ui text-3xl leading-tight font-bold tracking-tight text-balance">
-            {chapter.title}
-          </h1>
-          <p className="mt-3 font-body text-xl text-muted text-balance">{chapter.subtitle}</p>
-          <div className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-muted">
+          {number ? (
+            <p className="eyebrow mt-8 print-hide">
+              Chapter {String(number).padStart(2, "0")}
+              {chapter.kind === "case-study" ? <span className="text-subtle">· Case study</span> : null}
+            </p>
+          ) : null}
+          <h1 className="display chapter-title">{chapter.title}</h1>
+          <p className="lede mt-5 text-xl">{chapter.subtitle}</p>
+
+          <div className="chapter-meta">
             {authors.length > 0 ? <span>By {authors.map((a) => a.name).join(", ")}</span> : null}
-            {chapter.published ? (
-              <time dateTime={chapter.published}>{formatDate(chapter.published)}</time>
-            ) : null}
-            {chapter.published && chapter.updated !== chapter.published ? (
-              <span>
-                Updated <time dateTime={chapter.updated}>{formatDate(chapter.updated)}</time>
+            <span className="print-hide">
+              <Icon name="clock" size={16} />
+              {chapter.readingMinutes} min read
+            </span>
+            {chapter.figures.length > 0 ? (
+              <span className="print-hide">
+                <Icon name="diagram" size={16} />
+                {chapter.figures.length} diagrams
               </span>
             ) : null}
-            <span className="print-hide">{chapter.readingMinutes} min read</span>
+            {chapter.citations.length > 0 ? (
+              <span className="print-hide">
+                <Icon name="source" size={16} />
+                {chapter.citations.length} sources
+              </span>
+            ) : null}
+            {chapter.published ? (
+              <span>
+                <Icon name="calendar" size={16} />
+                <time dateTime={chapter.published}>{formatDate(chapter.published)}</time>
+              </span>
+            ) : null}
+            <span>
+              {chapter.published ? null : <Icon name="calendar" size={16} />}
+              {chapter.published ? "Updated " : "Last updated "}
+              <time dateTime={chapter.updated}>{formatDate(chapter.updated)}</time>
+            </span>
             <span className="print-hide">
               <StatusBadge status={chapter.status} />
             </span>
-            {chapter.tags.map((tag) => (
-              <Link key={tag} href={`/tags/${tag}`} className="badge print-hide hover:text-text">
-                {tag}
-              </Link>
-            ))}
             <span className="print-only">{canonical}</span>
           </div>
+
+          {chapter.tags.length > 0 ? (
+            <div className="mt-4 flex flex-wrap gap-2 print-hide">
+              {chapter.tags.map((tag) => (
+                <Link key={tag} href={`/tags/${tag}`} className="chip">
+                  #{tag}
+                </Link>
+              ))}
+            </div>
+          ) : null}
+
           <PrintPrep />
           {chapter.status === "archived" ? (
-            <p className="callout print-hide mt-6" data-type="warning" role="note">
+            <p className="notice print-hide" role="note">
+              <Icon name="warning" size={17} />
               This chapter is archived. It stays online so existing links keep working, but it is no
               longer maintained.
             </p>
           ) : null}
           {chapter.status === "draft" || chapter.status === "review" ? (
-            <p className="callout print-hide mt-6" data-type="warning" role="note">
-              {chapter.isFixture ? "Design fixture — never published." : `Unpublished ${chapter.status}.`}{" "}
-              {chapter.openTodos > 0 ? `${chapter.openTodos} open TODO(verify).` : null}
+            <p className="notice print-hide" role="note">
+              <Icon name="warning" size={17} />
+              <span>
+                {chapter.isFixture
+                  ? "Design fixture. Never published."
+                  : `This chapter is in ${chapter.status} and not yet published.`}{" "}
+                {chapter.openTodos > 0 ? `${chapter.openTodos} open TODO(verify).` : null}
+              </span>
             </p>
           ) : null}
         </header>
@@ -204,121 +242,128 @@ export default async function ChapterPage({ params }: PageProps<"/chapters/[slug
 
         <MDXContent code={chapter.body} components={getMdxComponents(chapter)} />
 
-        {chapter.prerequisites.length > 0 || usedIn.length > 0 ? (
-          <section aria-label="Related chapters" className="font-ui text-sm">
-            {chapter.prerequisites.length > 0 ? (
-              <p>
-                <strong>Prerequisites:</strong>{" "}
-                {chapter.prerequisites.map((slug, i) => (
-                  <span key={slug}>
-                    {i > 0 ? ", " : null}
-                    <ChapterLink slug={slug} />
-                  </span>
-                ))}
-              </p>
-            ) : null}
-            {usedIn.length > 0 ? (
-              <p className="mt-2">
-                <strong>Used in:</strong>{" "}
-                {usedIn.map((c, i) => (
-                  <span key={c.slug}>
-                    {i > 0 ? ", " : null}
-                    <ChapterLink slug={c.slug} />
-                  </span>
-                ))}
-              </p>
-            ) : null}
-          </section>
-        ) : null}
+        <div className="end-matter space-y-12">
+          {chapter.prerequisites.length > 0 || usedIn.length > 0 ? (
+            <section aria-label="Related chapters" className="end-section font-ui">
+              {chapter.prerequisites.length > 0 ? (
+                <div>
+                  <p className="text-xs font-bold tracking-[0.09em] text-muted uppercase">
+                    Read first
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {chapter.prerequisites.map((slug) => (
+                      <ChapterLink key={slug} slug={slug} />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {usedIn.length > 0 ? (
+                <div className="mt-6">
+                  <p className="text-xs font-bold tracking-[0.09em] text-muted uppercase">Used in</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {usedIn.map((c) => (
+                      <ChapterLink key={c.slug} slug={c.slug} />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
 
-        {hasReferences ? (
-          <section aria-labelledby="references" className="references">
-            <h2 id="references">References</h2>
-            {chapter.citations.length > 0 ? (
-              <ol className="text-[0.95em]">
-                {chapter.citations.map((c) => (
-                  <li key={c.n} id={`ref-${c.n}`} value={c.n} className="scroll-mt-20">
-                    {c.author ? `${c.author}. ` : null}
-                    <a href={c.href}>{c.title}</a>
-                    {c.year ? `. ${c.year}` : null}.
-                  </li>
-                ))}
-              </ol>
-            ) : null}
-            {chapter.references.length > 0 ? (
-              <>
-                <h3 id="further-reading">Further reading</h3>
-                <ul className="text-[0.95em]">
-                  {chapter.references.map((r) => (
-                    <li key={r.url}>
-                      {r.authors ? `${r.authors}. ` : null}
-                      <a href={r.url}>{r.title}</a>
-                      {r.year ? `. ${r.year}` : null}.
+          {hasReferences ? (
+            <section aria-labelledby="references" className="references end-section">
+              <h2 id="references">References</h2>
+              {chapter.citations.length > 0 ? (
+                <ol>
+                  {chapter.citations.map((c) => (
+                    <li key={c.n} id={`ref-${c.n}`} value={c.n}>
+                      <span>
+                        {c.author ? `${c.author}. ` : null}
+                        <a href={c.href}>{c.title}</a>
+                        {c.year ? `. ${c.year}` : null}.
+                      </span>
                     </li>
                   ))}
-                </ul>
-              </>
-            ) : null}
-          </section>
-        ) : null}
+                </ol>
+              ) : null}
+              {chapter.references.length > 0 ? (
+                <>
+                  <h3 id="further-reading">Further reading</h3>
+                  <ul>
+                    {chapter.references.map((r) => (
+                      <li key={r.url}>
+                        {r.authors ? `${r.authors}. ` : null}
+                        <a href={r.url}>{r.title}</a>
+                        {r.year ? `. ${r.year}` : null}.
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+            </section>
+          ) : null}
 
-        {chapter.revisions.length > 0 ? (
-          <section aria-labelledby="revision-history" className="font-ui text-sm">
-            <h2 id="revision-history">Revision history</h2>
-            <ul className="list-none! ps-0!">
-              {chapter.revisions.map((r) => (
-                <li key={`${r.date}-${r.note}`}>
-                  <time dateTime={r.date} className="text-muted tabular-nums">
-                    {r.date}
-                  </time>{" "}
-                  — {r.note}
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
+          {chapter.revisions.length > 0 ? (
+            <section aria-labelledby="revision-history" className="end-section font-ui text-sm">
+              <h2 id="revision-history">Revision history</h2>
+              <ul className="list-none! ps-0!">
+                {chapter.revisions.map((r) => (
+                  <li key={`${r.date}-${r.note}`}>
+                    <time dateTime={r.date} className="text-muted tabular-nums">
+                      {r.date}
+                    </time>{" "}
+                    — {r.note}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
 
-        <HowToCite chapter={chapter} markdownHref={markdownPath(chapter.slug)} />
+          <HowToCite chapter={chapter} markdownHref={markdownPath(chapter.slug)} />
 
-        {site.repoUrl ? (
-          <p className="print-hide font-ui text-sm text-muted">
-            <a
-              href={`${site.repoUrl}/edit/main/content/chapters/${chapter.folder}/index.mdx`}
-              className="link"
-            >
-              Edit this chapter
-            </a>
-            {" · "}
-            <a
-              href={`${site.repoUrl}/issues/new?template=errata.md&title=${encodeURIComponent(`Errata: ${chapter.title}`)}`}
-              className="link"
-            >
-              Report an error
-            </a>
-          </p>
-        ) : null}
+          {site.repoUrl ? (
+            <p className="print-hide font-ui text-sm text-muted">
+              <a
+                href={`${site.repoUrl}/edit/main/content/chapters/${chapter.folder}/index.mdx`}
+                className="link"
+              >
+                Edit this chapter
+              </a>
+              {" · "}
+              <a
+                href={`${site.repoUrl}/issues/new?template=errata.md&title=${encodeURIComponent(`Errata: ${chapter.title}`)}`}
+                className="link"
+              >
+                Report an error
+              </a>
+            </p>
+          ) : null}
 
-        {previous || next ? (
-          <nav
-            aria-label="Chapter navigation"
-            className="print-hide bleed-wide mt-16 grid gap-4 border-t border-border pt-8 font-ui sm:grid-cols-2"
-          >
-            {previous ? (
-              <Link href={`/chapters/${previous.slug}`} className="group">
-                <span className="text-sm text-muted">← Previous</span>
-                <span className="block font-semibold group-hover:text-accent">{previous.title}</span>
-              </Link>
-            ) : (
-              <span />
-            )}
-            {next ? (
-              <Link href={`/chapters/${next.slug}`} className="group sm:text-right">
-                <span className="text-sm text-muted">Next →</span>
-                <span className="block font-semibold group-hover:text-accent">{next.title}</span>
-              </Link>
-            ) : null}
-          </nav>
-        ) : null}
+          {previous || next ? (
+            <nav aria-label="Chapter navigation" className="pager print-hide">
+              {previous ? (
+                <Link href={`/chapters/${previous.slug}`} className="pager-card" data-dir="previous">
+                  <span className="pager-label">
+                    <Icon name="arrowLeft" size={14} />
+                    Previous
+                  </span>
+                  <span className="pager-title">{previous.title}</span>
+                </Link>
+              ) : (
+                <span />
+              )}
+              {next ? (
+                <Link href={`/chapters/${next.slug}`} className="pager-card" data-dir="next">
+                  <span className="pager-label">
+                    Next
+                    <Icon name="arrowRight" size={14} />
+                  </span>
+                  <span className="pager-title">{next.title}</span>
+                </Link>
+              ) : null}
+            </nav>
+          ) : null}
+        </div>
       </article>
     </div>
   );

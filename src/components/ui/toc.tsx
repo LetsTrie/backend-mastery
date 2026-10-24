@@ -1,4 +1,5 @@
 import type { TocItem } from "@/lib/content";
+import { Icon } from "./icons";
 import { TocSpy } from "./toc-spy";
 
 function TocList({ items }: { items: TocItem[] }) {
@@ -19,8 +20,15 @@ function TocList({ items }: { items: TocItem[] }) {
 export function TocRail({ items }: { items: TocItem[] }) {
   return (
     <nav className="toc" aria-label="On this page">
-      <p className="toc-title">On this page</p>
+      <p className="toc-title">
+        <Icon name="list" size={15} />
+        On this page
+      </p>
       <TocList items={items} />
+      <a href="#main" className="toc-top">
+        <Icon name="arrowUp" size={14} />
+        Back to top
+      </a>
       <TocSpy ids={items.map((item) => item.id)} />
     </nav>
   );
@@ -30,7 +38,10 @@ export function TocRail({ items }: { items: TocItem[] }) {
 export function TocInline({ items }: { items: TocItem[] }) {
   return (
     <details className="toc-inline">
-      <summary>On this page</summary>
+      <summary>
+        <Icon name="list" size={16} />
+        On this page
+      </summary>
       <nav className="toc" aria-label="On this page (collapsible)">
         <TocList items={items} />
       </nav>

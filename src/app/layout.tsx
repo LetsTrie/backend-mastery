@@ -3,7 +3,7 @@ import { SiteFooter } from "@/components/ui/site-footer";
 import { SiteHeader } from "@/components/ui/site-header";
 import { themeScript } from "@/components/ui/theme-toggle";
 import { site } from "@/lib/site";
-import { inter, jetbrainsMono, sourceSerif } from "./fonts";
+import { geist, geistMono, newsreader } from "./fonts";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -30,7 +30,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${sourceSerif.variable} ${inter.variable} ${jetbrainsMono.variable} antialiased`}
+      className={`${newsreader.variable} ${geist.variable} ${geistMono.variable} antialiased`}
       suppressHydrationWarning
     >
       <head>

@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { Icon } from "@/components/ui/icons";
 import type { ResolvedFigure } from "@/lib/content";
 import { InlineText } from "./inline-text";
 
@@ -50,11 +51,16 @@ export function Figure({ figure }: { figure: ResolvedFigure | undefined }) {
         ) : (
           <p className="figure-missing">Missing figure file: {figure.src}</p>
         )}
+        {figure.exists ? (
+          <span className="figure-zoom print-hide" aria-hidden="true">
+            <Icon name="expand" size={15} />
+          </span>
+        ) : null}
       </div>
       <figcaption>
         <a className="figure-label" href={`#${anchor}`}>
-          Figure {figure.number}.
-        </a>{" "}
+          Figure {figure.number}
+        </a>
         <InlineText text={figure.caption} />
       </figcaption>
     </figure>

@@ -1,12 +1,14 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { Icon, type IconName } from "./icons";
 
 type Theme = "system" | "light" | "dark";
 const STORAGE_KEY = "theme";
 const listeners = new Set<() => void>();
 const order: Theme[] = ["system", "light", "dark"];
 const labels: Record<Theme, string> = { system: "Auto", light: "Light", dark: "Dark" };
+const icons: Record<Theme, IconName> = { system: "monitor", light: "sun", dark: "moon" };
 
 function readTheme(): Theme {
   try {
@@ -41,14 +43,17 @@ export function ThemeToggle() {
     listeners.forEach((listener) => listener());
   }
 
+  const next = order[(order.indexOf(theme) + 1) % order.length] ?? "system";
+
   return (
     <button
       type="button"
       onClick={cycle}
-      className="rounded-sm border border-border px-2.5 py-1 text-xs whitespace-nowrap text-muted hover:text-text"
-      aria-label={`Color theme: ${labels[theme]}. Activate to change.`}
+      className="icon-button"
+      aria-label={`Color theme: ${labels[theme]}. Switch to ${labels[next]}.`}
+      title={`Theme: ${labels[theme]}`}
     >
-      {labels[theme]}
+      <Icon name={icons[theme]} size={18} />
     </button>
   );
 }

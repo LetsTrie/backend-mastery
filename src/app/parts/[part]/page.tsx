@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChapterList } from "@/components/ui/chapter-list";
-import { getPart, getParts } from "@/lib/content";
+import { getPart, getParts, getPlanned, partNumeral } from "@/lib/content";
 
 export const dynamicParams = false;
 
@@ -22,13 +23,24 @@ export async function generateMetadata({ params }: PageProps<"/parts/[part]">): 
 export default async function PartPage({ params }: PageProps<"/parts/[part]">) {
   const part = getPart((await params).part);
   if (!part) notFound();
+  const planned = getPlanned(part);
 
   return (
-    <div className="mx-auto max-w-3xl px-4 pt-16 sm:px-6">
-      <p className="text-sm text-muted">Part</p>
-      <h1 className="mt-1 text-3xl font-semibold tracking-tight">{part.title}</h1>
-      <p className="mt-4 mb-10 font-body text-lg text-muted">{part.description}</p>
-      <ChapterList chapters={part.items} />
+    <div className="container-page max-w-4xl">
+      <header className="pt-12 pb-8 sm:pt-16">
+        <nav aria-label="Breadcrumb" className="breadcrumb">
+          <Link href="/chapters">Chapters</Link>
+          <span aria-hidden="true">/</span>
+          <span>Part {partNumeral(part.key)}</span>
+        </nav>
+        <p className="mt-8 font-display text-5xl font-semibold text-subtle">{partNumeral(part.key)}</p>
+        <h1 className="display mt-3 text-4xl">{part.title}</h1>
+        <p className="lede mt-5 max-w-2xl">{part.description}</p>
+        <p className="mt-6 text-sm text-muted">
+          {part.items.length} written · {planned.length} planned
+        </p>
+      </header>
+      <ChapterList chapters={part.items} planned={planned} />
     </div>
   );
 }

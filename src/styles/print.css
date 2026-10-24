@@ -129,6 +129,14 @@
     font-size: 8pt !important;
     gap: 0 3mm !important;
   }
+  /* The opener's own bottom rule is enough; drop the screen meta strip's rules and padding. */
+  .chapter-hero {
+    padding-block: 0 !important;
+  }
+  .chapter-meta {
+    padding-block: 0 !important;
+    border-block: 0 !important;
+  }
 
   /* ── Rhythm: tighter than screen, still book-like ───────────────── */
   .prose > * + * {

@@ -11,7 +11,7 @@ target: "Row's target topic\n(channel lane, request topic,\nor fan-out job)" {cl
 suppressed: Suppression log {class: datastore}
 
 processor -> due: "① write, jittered due time"
-campaigns -> due: "① one row per UTC offset"
+campaigns -> due: "① one row per IANA time zone"
 due -> sweeper: "② read own shard, claim with lease" {class: focus}
 sweeper -> target: "③ publish" {class: async}
 sweeper -> due: "④ mark released"

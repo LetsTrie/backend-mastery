@@ -117,3 +117,19 @@ token-bucket:
 wide-column-store:
   term: Wide-column store
   definition: A distributed database, such as Cassandra or Bigtable, that groups rows into partitions by key and sorts them within each partition. It is built for very high write volume and fast reads of one partition's newest rows.
+
+frequency-cap:
+  term: Frequency cap
+  definition: A per-user limit on how many notifications of a kind can be sent in a period, such as at most 3 marketing pushes a day; anything over the limit is dropped or deferred.
+
+deduplication:
+  term: Deduplication
+  definition: Recognizing that a message has already been processed or sent, and dropping the repeat, so retries and producer bugs do not reach the user twice.
+
+channel-escalation:
+  term: Escalation across channels
+  definition: Sending through a cheap channel first (such as push) and, if the user has not opened it within a set time, falling back to a costlier one (such as SMS).
+
+delivery-tracking:
+  term: Delivery tracking
+  definition: Recording each notification's progress (queued, sent, delivered, opened, or failed) from provider callbacks and app receipts, so senders can see what happened to it.

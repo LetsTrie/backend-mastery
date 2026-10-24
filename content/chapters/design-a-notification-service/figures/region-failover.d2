@@ -3,20 +3,23 @@
 direction: down
 
 producers: Producer services {class: service}
-directory: "User directory\n(home region, epoch)" {class: datastore}
+directory: "User directory\n(home, epoch, lease)" {class: datastore}
 
 pair: Paired regions {
   class: boundary
-  direction: right
+  grid-columns: 2
 
-  a: "Region A (lost)" {
+  a: "Region A (lease expired)" {
     class: boundary
     direction: down
     topics: Request topics {class: queue}
+    workers: "Workers\n(stopped)" {class: service}
     state: "Send log, caps,\nschedule, inbox" {class: datastore}
+    topics -> workers
+    workers -> state
   }
 
-  b: "Region B (new home)" {
+  b: "Region B (new owner)" {
     class: boundary
     direction: down
     api: Notification API {class: service}
@@ -33,6 +36,7 @@ pair: Paired regions {
 
 providers: Providers {class: external}
 
-directory -> pair.b.workers: "① home = B, epoch 8" {class: focus}
+directory -> pair.b.workers: "① lease + epoch 8" {class: focus}
 producers -> pair.b.api: "② route to new home"
-pair.b.workers -> providers: "③ send; claims carry epoch 8"
+pair.b.workers -> providers: "③ send while lease valid"
+pair.a.workers -> providers: "blocked: lease expired" {class: failure}

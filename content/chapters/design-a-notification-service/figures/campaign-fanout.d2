@@ -12,7 +12,7 @@ processor: Notification processor {class: service}
 bulk: Bulk lane {class: queue}
 
 campaigns -> scheduler: "① schedule: 09:00 local"
-scheduler -> fanout: "② one job per UTC offset, jittered"
+scheduler -> fanout: "② one job per IANA time zone, jittered"
 fanout -> segments: "③ page 1,000 user IDs"
 fanout -> progress: "④ checkpoint cursor"
 fanout -> batches: "⑤ one message per page, key = hash(campaign, page)" {class: async}

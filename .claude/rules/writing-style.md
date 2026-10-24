@@ -50,7 +50,8 @@ Write so that a reader can:
 
 ## Terms, numbers, and units
 
-- Define an acronym on first use per chapter: "time-to-live (TTL)". If the term
+- Define an acronym on first use per chapter: "time-to-live (TTL)". Skip the
+  expansion for acronyms every reader knows (SMS, API, HTTP, URL). If the term
   exists in `content/glossary.yml`, wrap first use in `<Term id="ttl">TTL</Term>`.
 - Code identifiers, field names, endpoints, and config keys in backticks.
 - Units: `ms`, `s`, `KB`, `MB`, `GB`, `TB` (decimal, powers of 1000 for

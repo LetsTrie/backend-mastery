@@ -21,7 +21,7 @@ subsections freely.
 | #  | `##` heading                    | Must contain                                                                                   |
 | -- | ------------------------------- | ---------------------------------------------------------------------------------------------- |
 | 0  | *(no heading — intro)*          | 1–3 paragraphs: what we're building and why it's hard. No summary box; the subtitle sets up the read. |
-| 1  | Problem and scope               | What the system does, who uses it, what is explicitly **out of scope**.                        |
+| 1  | Problem and scope               | What the system does, who uses it, and what it covers. No "Out of scope" list; state a boundary in one sentence only when it shapes the design. |
 | 2  | Requirements                    | `### Functional`, `### Non-functional` (each with a number: latency, availability, durability). |
 | 3  | Back-of-the-envelope estimation | `###` subsections (traffic, storage, …). Each calculation sits right beside its assumption (see below); optional "At a glance" summary table at the end. |
 | 4  | API design                      | Endpoints / events / contracts. Request + response shapes. Idempotency and pagination stated.   |

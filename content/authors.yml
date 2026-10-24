@@ -7,6 +7,9 @@
 #   bio: One sentence.
 #   url: https://example.com
 #   github: handle
-#
-# Replace `{}` below with the first entry when adding an author.
-{}
+
+md-sakib-khan:
+  name: MD Sakib Khan
+  role: Software Engineering Manager, SuperAnnotate AI Inc.
+  url: https://github.com/LetsTrie
+  github: LetsTrie

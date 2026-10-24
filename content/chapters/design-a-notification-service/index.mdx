@@ -9,9 +9,10 @@ description: >-
 part: case-studies
 tags: [messaging, queues, fan-out, push-notifications, reliability]
 prerequisites: [message-queues, idempotency, rate-limiting-algorithms]
-status: review
-authors: []
+status: published
+authors: [md-sakib-khan]
 reviewers: []
+published: 2026-10-24
 updated: 2026-10-24
 references:
   - title: "Designing Data-Intensive Applications"
@@ -26,7 +27,9 @@ references:
     authors: "Gregor Hohpe, Bobby Woolf"
     year: 2003
     url: https://www.enterpriseintegrationpatterns.com/
-revisions: []
+revisions:
+  - date: 2026-10-24
+    note: First published.
 ---
 
 <KeyTakeaways>
@@ -209,7 +212,7 @@ Content-Type: application/json
 A few deliberate choices here:
 
 - **`202 Accepted`, not `200 OK`.** We have recorded the request, not delivered it. Pretending otherwise invites producers to build on a guarantee we cannot make.
-- **`Idempotency-Key` header.** If the producer times out and retries, we return the original `notification_id` instead of creating a second notification. The <Term id="idempotency-key">idempotency key</Term> follows the IETF draft for an `Idempotency-Key` header <Cite href="https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/" title="The Idempotency-Key HTTP Header Field" author="IETF HTTPAPI Working Group" />; see [Idempotency](/chapters/idempotency) for the general technique.
+- **`Idempotency-Key` header.** If the producer times out and retries, we return the original `notification_id` instead of creating a second notification. The <Term id="idempotency-key">idempotency key</Term> follows the IETF draft for an `Idempotency-Key` header <Cite href="https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/" title="The Idempotency-Key HTTP Header Field" author="IETF HTTPAPI Working Group" />; the general technique gets its own chapter in Building blocks.
 - **`category`, not channel.** Producers say *what kind* of notification this is. Users' preferences are expressed per category, and the platform picks channels. A producer can request specific channels, but `auto` is the default. A category also carries policy: its priority, whether it may be disabled, what to do on an unknown outcome, and whether its content is sensitive.
 - **`ttl_seconds`.** A "your driver is arriving" push is worthless ten minutes later. Every notification carries a <Term id="ttl">time-to-live (TTL)</Term>, and stale ones are dropped rather than delivered late.
 - **`collapse_key`.** Later notifications with the same key replace earlier ones on the device, so "order shipped" can be replaced by "out for delivery" instead of stacking.
@@ -372,7 +375,7 @@ The fix is a dedicated platform with queues at its front door. <FigRef id="high-
 Why this shape?
 
 - **The API is thin.** It does four cheap things: authenticate, check the producer's quota, deduplicate, append. That is how we get 99.99% availability for ingestion even when a provider, the preference service, or a template is broken.
-- **The request topics are shock absorbers.** A campaign launch or a provider outage turns into queue lag, not dropped requests. We use a log-based broker (Kafka or similar) because we want replay and per-partition ordering by user; see [Message queues](/chapters/message-queues).
+- **The request topics are shock absorbers.** A campaign launch or a provider outage turns into queue lag, not dropped requests. We use a log-based broker (Kafka or similar) because we want replay and per-partition ordering by user; message queues get their own chapter in Building blocks.
 - **Priority is split at the door.** A login code and a campaign page never share a topic or a processor pool, so neither can delay the other. The channel lanes in [Fan-out and priority](#fan-out-and-priority) continue the same split down to the providers.
 - **One topic per channel** isolates channels from each other. An email provider outage backs up the email topic; push keeps flowing.
 - **The processor is where policy lives.** Preferences, caps, quiet hours, and channel choice are decided once, in one place, instead of in every producer.
@@ -484,7 +487,7 @@ At 9:00 on a Monday, marketing launches a campaign to 50M users. At 9:01, a user
 
 Separate topics and pools give isolation in time: a backlog in `bulk` cannot delay a message in `high`. But all three lanes still share one provider quota, so the provider rate limiter divides it. `high` and `normal` get reserved shares; `bulk` gets whatever is left. When a burst of login codes arrives, the campaign slows down automatically. Netflix's RENO system uses the same idea, routing events into separate queues by priority with their own processing clusters <Cite href="https://www.infoq.com/news/2022/03/netflix-reno/" title="Netflix's RENO Keeps Experience Consistent across Devices" author="InfoQ" year="2022" />.
 
-The rate limiter is a token bucket per provider and lane (see [Rate limiting algorithms](/chapters/rate-limiting-algorithms)). With hundreds of workers, a central counter becomes a hot spot, so each worker leases a slice of the budget — "you may send 200 messages per second for the next 10 seconds" — and renews it. The limiter trades a little precision for not putting a network hop in front of every send. Leases also make the limiter adaptive. When a provider answers `429`, the coordinator halves the lane's total rate; after a quiet interval it adds back a small fixed step. That is additive increase, multiplicative decrease (AIMD), the same rule the Transmission Control Protocol (TCP) uses for congestion: back off fast, probe back slowly, and settle a little under the provider's real limit, which is often lower than its published one.
+The rate limiter is a token bucket per provider and lane (rate-limiting algorithms get their own chapter in Building blocks). With hundreds of workers, a central counter becomes a hot spot, so each worker leases a slice of the budget — "you may send 200 messages per second for the next 10 seconds" — and renews it. The limiter trades a little precision for not putting a network hop in front of every send. Leases also make the limiter adaptive. When a provider answers `429`, the coordinator halves the lane's total rate; after a quiet interval it adds back a small fixed step. That is additive increase, multiplicative decrease (AIMD), the same rule the Transmission Control Protocol (TCP) uses for congestion: back off fast, probe back slowly, and settle a little under the provider's real limit, which is often lower than its published one.
 
 **Where the five seconds go.** The high lane's target is a p99 of 5 s from acceptance to provider handoff. The work itself takes well under a second; the budget exists to absorb queueing and exactly one retry.
 

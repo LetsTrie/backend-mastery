@@ -3,14 +3,42 @@ import { Icon } from "./icons";
 import { TocSpy } from "./toc-spy";
 import { TocToggle } from "./toc-toggle";
 
+type TocGroup = { item: TocItem; children: TocItem[] };
+
+/** Nests each `###` under its `##`, so a section's sub-items can show only while it is active. */
+function group(items: TocItem[]): TocGroup[] {
+  const groups: TocGroup[] = [];
+  for (const item of items) {
+    const last = groups.at(-1);
+    if (item.depth > 2 && last) last.children.push(item);
+    else groups.push({ item, children: [] });
+  }
+  return groups;
+}
+
+function TocLink({ item }: { item: TocItem }) {
+  return (
+    <a href={`#${item.id}`} data-toc-id={item.id}>
+      {item.text}
+    </a>
+  );
+}
+
 function TocList({ items }: { items: TocItem[] }) {
   return (
     <ul>
-      {items.map((item) => (
+      {group(items).map(({ item, children }) => (
         <li key={item.id} data-depth={item.depth}>
-          <a href={`#${item.id}`} data-toc-id={item.id}>
-            {item.text}
-          </a>
+          <TocLink item={item} />
+          {children.length > 0 ? (
+            <ul className="toc-sub">
+              {children.map((child) => (
+                <li key={child.id} data-depth={child.depth}>
+                  <TocLink item={child} />
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </li>
       ))}
     </ul>

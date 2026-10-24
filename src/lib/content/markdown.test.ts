@@ -34,7 +34,7 @@ SELECT 1;
   </Tab>
 </Tabs>
 
-<Aside>A tangent.</Aside>
+<Aside title="Side point">A tangent.</Aside>
 
 [Inbox](#inbox) and [another chapter](/chapters/idempotency).
 `;
@@ -77,7 +77,7 @@ describe("mdx → portable markdown", () => {
 
   it("keeps callouts, asides, estimates, and tabs readable", () => {
     expect(md).toContain("> **In the interview.** Say the number out loud.");
-    expect(md).toContain("> **Aside.** A tangent.");
+    expect(md).toContain("> **Good to know: Side point.** A tangent.");
     expect(md).toContain("**Estimate: Traffic**");
     expect(md).toMatch(/\| Peak +\| 58k +\|/);
     expect(md).toContain("**SQL**");

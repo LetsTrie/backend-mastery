@@ -105,7 +105,10 @@ paths are also dashed-red *and* labeled.
   labels become hard to read on paper (below ~6 pt). Prefer wider, shorter layouts
   (`grid-columns`, side-by-side `boundary` groups), or split one tall figure into two.
 - No paragraphs inside diagrams.
-- Readers can click any figure to open the full-size SVG.
+- Readers can click any figure to open it in a gallery (`<FigureGallery />`, built on
+  yet-another-react-lightbox, loaded on first open): zoom, pan, fullscreen, and
+  previous/next across the chapter's figures, in the reader's theme. The figure stays
+  a plain link to the SVG for no-JS, middle-click, and modifier-click.
 
 ## Accessibility
 

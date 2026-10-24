@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getMdxComponents } from "@/components/mdx";
+import { FigureGallery } from "@/components/mdx/figure-gallery";
 import { TermTips } from "@/components/mdx/term-tips";
 import { HowToCite } from "@/components/ui/how-to-cite";
 import { Icon } from "@/components/ui/icons";
@@ -206,6 +207,24 @@ export default async function ChapterPage({ params }: PageProps<"/chapters/[slug
 
         <MDXContent code={chapter.body} components={getMdxComponents(chapter)} />
         <TermTips />
+        <FigureGallery
+          slides={chapter.figures.flatMap((f) =>
+            f.exists && f.size
+              ? [
+                  {
+                    id: f.id,
+                    src: f.url,
+                    darkSrc: f.darkUrl,
+                    width: f.size.width,
+                    height: f.size.height,
+                    alt: f.alt,
+                    title: `Figure ${f.number}`,
+                    description: f.caption.replaceAll("`", ""),
+                  },
+                ]
+              : [],
+          )}
+        />
 
         <div className="end-matter space-y-12">
           {chapter.prerequisites.length > 0 || usedIn.length > 0 ? (

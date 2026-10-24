@@ -230,14 +230,12 @@
   .callout-title {
     color: #111;
   }
-  .margin-note-anchor {
-    position: static !important;
-    height: auto !important;
-  }
-  .margin-note {
-    position: static !important;
-    width: auto !important;
+  /* Good-to-know boxes print open (PrintPrep opens them); no toggle chrome on paper. */
+  .good-to-know {
     break-inside: avoid;
+  }
+  .good-to-know-chevron {
+    display: none;
   }
 
   /* ── Tables: no scroll containers; header row repeats on each page ── */

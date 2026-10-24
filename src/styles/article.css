@@ -918,26 +918,96 @@
     color: var(--color-accent-strong);
   }
 
-  /* ── Margin notes ─────────────────────────────────────────────────── */
-  .margin-note {
-    padding: 0.85rem 1rem;
+  /* ── Good to know (<Aside>): a collapsed, optional detail ─────────── */
+  .good-to-know {
+    border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
     background: var(--color-surface);
+    transition: border-color var(--duration-fast) var(--ease-out);
+  }
+  .good-to-know:hover,
+  .good-to-know[open] {
+    border-color: var(--color-border-strong);
+  }
+  .good-to-know summary {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.7rem 0.9rem;
+    cursor: pointer;
+    list-style: none;
     font-family: var(--font-ui);
     font-size: var(--text-sm);
-    line-height: 1.5;
-    color: var(--color-muted);
+    line-height: 1.4;
+    border-radius: inherit;
   }
-  .margin-note::before {
-    content: "Aside";
-    display: block;
-    margin-bottom: 0.35rem;
-    font-size: 0.7rem;
+  .good-to-know summary::-webkit-details-marker {
+    display: none;
+  }
+  .good-to-know-icon {
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: var(--radius-full);
+    background: var(--color-accent-soft);
+    color: var(--color-accent);
+  }
+  .good-to-know-label {
+    flex: none;
+    font-size: var(--text-xs);
     font-weight: 700;
     letter-spacing: var(--tracking-label);
     text-transform: uppercase;
-    color: var(--color-subtle);
+    color: var(--color-accent);
   }
+  .good-to-know-title {
+    min-width: 0;
+    font-weight: 600;
+    color: var(--color-text);
+  }
+  .good-to-know-chevron {
+    display: inline-flex;
+    margin-inline-start: auto;
+    color: var(--color-muted);
+    transition: transform var(--duration-base) var(--ease-out);
+  }
+  .good-to-know[open] .good-to-know-chevron {
+    transform: rotate(180deg);
+  }
+  .good-to-know-body {
+    padding: 0.15rem 1rem 1rem 3.25rem;
+    font-size: 0.95em;
+  }
+  .good-to-know-body > * + * {
+    margin-top: 0.75em;
+  }
+  @media (max-width: 40rem) {
+    .good-to-know-label {
+      display: none;
+    }
+    .good-to-know-body {
+      padding-inline-start: 1rem;
+    }
+  }
+
+  /* ── Figure gallery (yet-another-react-lightbox; its own CSS loads on first open) ── */
+  .figure-lightbox {
+    --yarl__color_backdrop: oklch(0.14 0.005 70 / 0.96);
+    --yarl__slide_captions_container_background: oklch(0.14 0.005 70 / 0.8);
+    --yarl__slide_description_color: oklch(0.85 0.01 80);
+    font-family: var(--font-ui);
+  }
+  .figure-lightbox .yarl__slide_title {
+    font-size: var(--text-md);
+    font-weight: 600;
+  }
+  .figure-lightbox .yarl__slide_description {
+    font-size: var(--text-sm);
+    line-height: 1.5;
+  }
+
   /* ── Tabs (progressively enhanced), styled as a segmented control ── */
   .tabs-list {
     display: inline-flex;
@@ -1011,6 +1081,13 @@
   }
   .toc ul {
     border-inline-start: 1px solid var(--color-border);
+  }
+  .toc .toc-sub {
+    border-inline-start: 0;
+  }
+  /* Sub-items show only under the section being read (the scroll-spy marks it). */
+  .toc li[data-depth="2"]:not(:has(a[aria-current="true"])) > .toc-sub {
+    display: none;
   }
   .toc a {
     position: relative;

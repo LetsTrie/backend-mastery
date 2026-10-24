@@ -74,10 +74,11 @@ never rename a token without updating print.
   `--measure-wide` (92ch), with a 2.5rem gap on the left and a 2rem breakout
   gutter for wide figures; don't leave an empty right margin. Below that, text is
   `--measure` (76ch) with `--breakout` (4.5rem) gutters.
-- `<Aside>` renders inline, as a tinted note, at every width.
+- `<Aside>` renders as a collapsed "Good to know" box (`.good-to-know`), text width.
 - Table of contents: sticky left rail on ≥ 1280 px, separated from the content
   by a 1 px right border, with scroll-spy (the active section is the last heading
-  scrolled past). Below 1280 px there is no table of contents.
+  scrolled past). Sub-items (`###`) show only under the section being read.
+  Below 1280 px there is no table of contents.
 - The rail collapses to a single toggle button (`TocToggle`, beside "On this
   page"); collapsed, the article centers in the freed space. The choice persists
   in `localStorage` and is restored before first paint by

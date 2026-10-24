@@ -56,6 +56,7 @@ const paths = {
       <path d="M8.5 11h7M8.5 14.5h7M8.5 7.5h3" />
     </>
   ),
+  chevronDown: <path d="m6 9.5 6 6 6-6" />,
   arrowRight: <path d="M4.5 12h15M13.5 6l6 6-6 6" />,
   arrowLeft: <path d="M19.5 12h-15M10.5 6l-6 6 6 6" />,
   arrowUp: <path d="M12 19.5v-15M6 10.5l6-6 6 6" />,

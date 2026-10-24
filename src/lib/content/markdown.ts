@@ -122,7 +122,7 @@ function convertJsx(node: JsxElement, ctx: MarkdownContext): RootContent[] {
     case "Highlight":
       return [{ type: "strong", children: children() as never }];
     case "Aside":
-      return labelledQuote("Aside", children());
+      return labelledQuote(attr(node, "title") ? `Good to know: ${attr(node, "title")}` : "Good to know", children());
     case "Estimate":
       return [paragraph([strong(`Estimate: ${attr(node, "title") ?? "back of the envelope"}`)]), ...children()];
     case "Tradeoffs":

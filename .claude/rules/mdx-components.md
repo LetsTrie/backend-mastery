@@ -72,9 +72,9 @@ As <FigRef id="high-level-design" /> shows, …
 interview-coaching asides. Max ~1 callout per 800 words.
 
 ### `<Estimate>`
-Optional. Estimates are written as assumption → small plain Markdown table
-(see `chapter-blueprint.md`). Use `<Estimate>` only for a short summary table at the
-end of the estimation section, never as the only place a calculation appears.
+*Kept so older content keeps rendering; not used in chapters.* Estimates are
+written as assumption → small plain Markdown table (see `chapter-blueprint.md`),
+with no summary table at the end.
 ```mdx
 <Estimate title="Traffic">
 | Quantity          | Formula                     | Result        |
@@ -144,7 +144,20 @@ few per chapter); ordinary emphasis is `**bold**`.
 ```
 
 ### `<Aside>`
-Tangential but interesting; renders inline as a tinted note. Must not contain anything required to follow the main text.
+A **"Good to know"** box: a collapsed, optional detail the reader can open or
+skip (native `<details>` with a lightbulb icon and a chevron; print opens it).
+Use it for side points, edge cases, and practical details that a reader can
+skip without losing the thread ("two smaller points…", "one more detail…").
+Must not contain anything required to follow the main text. Always give a
+short `title` that says what is inside. Leave blank lines inside so Markdown
+renders.
+```mdx
+<Aside title="Raw addresses and per-producer quotas">
+
+`recipient` can also be a raw address…
+
+</Aside>
+```
 
 ---
 

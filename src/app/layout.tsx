@@ -37,7 +37,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <head>
         <script dangerouslySetInnerHTML={{ __html: prePaintScript }} />
       </head>
-      <body>
+      {/* Extensions (e.g. Grammarly) add attributes to <body> before hydration; this ignores
+          attribute differences on <body> only, not its children. */}
+      <body suppressHydrationWarning>
         <a href="#main" className="skip-link">
           Skip to content
         </a>

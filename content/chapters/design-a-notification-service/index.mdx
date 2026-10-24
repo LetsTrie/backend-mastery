@@ -38,9 +38,9 @@ revisions:
 
 Every product eventually needs to tap someone on the shoulder. Your order shipped. Someone replied to your comment. Here is your login code. It looks like the easiest feature in the backlog: call Apple, call Google, call an email provider, done.
 
-Then the product grows, and one bad Monday morning everything goes wrong at once. A marketing campaign to 40 million people delays password-reset emails by an hour. A retry loop sends the same "Your payment failed" push four times. A user who turned off promotional email gets one anyway and reports it as spam, which hurts delivery for everyone. And the push provider starts rejecting requests because of a quota nobody knew existed.
+Then the product grows. One Monday morning, a marketing campaign goes out to 40 million people and password-reset emails stop arriving for an hour. A retry loop sends the same "Your payment failed" push four times. A user who turned off promotional email gets one anyway, and complains to their email provider, and your domain's reputation drops for everyone. The push provider starts rejecting your requests because you exceeded a quota you did not know existed.
 
-In this chapter we design a notification service that prevents all four. It sends a billion notifications a day by push, email, SMS, and an in-app inbox, and it knows when *not* to send: when the user opted out, when it is 3 a.m. for them, or when they already got the same message. The last section walks through that Monday again and shows which part of the design stops each failure.
+A notification service is where reliability engineering meets human attention. In this chapter we design one that sends a billion notifications a day across push, email, SMS, and an in-app inbox. Delivering a message is only half the job. The other half is deciding when *not* to send one: the user turned that kind of message off, it is 3 a.m. where they live, they already got three marketing pushes today, or the same message went out a minute ago. We give that decision as much care as the delivery itself. At the end, we replay that Monday morning against the finished design and name the component that contains each failure.
 
 ## Problem and scope
 

@@ -46,8 +46,10 @@ Rules:
 - Estimation numbers flow downstream: if section 3 says 12k QPS peak, section 8
   must scale *from 12k*, not a new made-up number.
 - Estimates read top to bottom without jumping back: state an assumption, then
-  the calculation that uses it with its result, then the next assumption.
-  Results are plain text, not bold.
+  a small Markdown table (`Quantity | Calculation | Result`, a few rows) with the
+  calculations that use it, then the next assumption. One small table per step,
+  never one big table far from its assumptions, and never bullet lists. Results
+  are plain text, not bold.
   Never collect every assumption in one list and every formula in a distant table.
   Explain any number a reader can't derive at a glance (what a "status event"
   is, why rows are kept two days).
@@ -55,8 +57,10 @@ Rules:
 ```mdx
 **Assume 10M DAU, 5 notifications per user per day.**
 
-- 10M × 5 = 50M notifications/day
-- 50M ÷ 86,400 s ≈ 580 per second on average
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Notifications per day | 10M × 5 | 50M |
+| Average rate | 50M ÷ 86,400 s | ≈ 580 per second |
 ```
 
 ## B. Building-block chapter ("Consistent hashing", "Idempotency", …)

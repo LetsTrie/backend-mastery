@@ -133,3 +133,43 @@ channel-escalation:
 delivery-tracking:
   term: Delivery tracking
   definition: Recording each notification's progress (queued, sent, delivered, opened, or failed) from provider callbacks and app receipts, so senders can see what happened to it.
+
+throughput:
+  term: Throughput
+  definition: How much work a system completes per unit of time, such as notifications sent per second. It is a rate, not a speed; latency measures how long each item takes.
+
+provider-handoff:
+  term: Provider handoff
+  definition: The moment our worker passes a notification to an outside provider (APNs, FCM, an email or SMS service) and the provider accepts it. From then on, delivery is in the provider's hands.
+
+best-effort:
+  term: Best-effort
+  definition: No timing promise. The work is done as soon as spare capacity allows, after urgent traffic, so it may take minutes during busy periods.
+
+ingestion-api:
+  term: Ingestion API
+  definition: The front door of the platform, the endpoint other services call to submit a notification. It only checks, records, and queues the request; delivery happens later, behind it.
+
+availability-nines:
+  term: Availability ("nines")
+  definition: The share of time a service works as promised. 99.9% ("three nines") allows about 8.8 hours of downtime a year; 99.99% ("four nines") about 53 minutes.
+
+http-202-accepted:
+  term: 202 Accepted
+  definition: An HTTP response meaning "received and queued, but not processed yet". The caller gets an id now and learns the outcome later.
+
+suppression:
+  term: Suppression
+  definition: Deliberately not sending a notification because a rule says so, such as an opt-out, quiet hours, a frequency cap, or a duplicate. The reason is recorded so it can be explained later.
+
+indeterminate-outcome:
+  term: Indeterminate outcome
+  definition: A send whose result nobody can know, for example when the connection to the provider drops after the request went out. We record it as indeterminate instead of guessing "sent" or "failed".
+
+exactly-once-delivery:
+  term: Exactly-once delivery
+  definition: A guarantee that every message arrives one time, never zero and never twice. It is expensive inside one system and impossible end to end when the last step is a call to an outside provider.
+
+global-ordering:
+  term: Global ordering
+  definition: A guarantee that every message is processed in the exact order it was created, across the whole system. It forces everything through one sequence, which limits scale.

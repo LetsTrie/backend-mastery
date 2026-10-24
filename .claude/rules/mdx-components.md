@@ -72,8 +72,8 @@ As <FigRef id="high-level-design" /> shows, …
 interview-coaching asides. Max ~1 callout per 800 words.
 
 ### `<Estimate>`
-Optional. Estimates are written inline (assumption → calculation → result; see
-`chapter-blueprint.md`). Use `<Estimate>` only for a short summary table at the
+Optional. Estimates are written as assumption → small plain Markdown table
+(see `chapter-blueprint.md`). Use `<Estimate>` only for a short summary table at the
 end of the estimation section, never as the only place a calculation appears.
 ```mdx
 <Estimate title="Traffic">

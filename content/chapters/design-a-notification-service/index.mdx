@@ -66,13 +66,13 @@ We are building an internal platform. Other teams' services, which we call **pro
 
 ### Non-functional
 
-- **Throughput:** 1B notifications per day, with peaks around 58k notifications per second and about 63k provider calls per second (derived below).
-- **Latency:** for high-priority notifications (login codes, security alerts), <Term id="p99">p99</Term> under 5 s from API acceptance to provider handoff. Bulk notifications are best-effort and may take minutes.
-- **Availability:** the ingestion API is 99.99% available (≈ 53 min of downtime a year). Delivery may lag during incidents, but accepting requests must not stop.
-- **Durability:** once we return `202 Accepted`, the notification is never silently lost. It is delivered, suppressed by a rule, expired, dead-lettered, or marked indeterminate, and every outcome is recorded. The one exception is losing an entire region, where notifications accepted in the last few seconds may be lost or sent twice; [Regions](#regions) quantifies that.
+- **<Term id="throughput">Throughput</Term>:** 1B notifications per day, peaking around 58k notifications per second and about 63k calls per second to providers. Don't worry about where these numbers come from yet; the next section works them out step by step.
+- **Latency:** for high-priority notifications (login codes, security alerts), <Term id="p99">p99</Term> under 5 s from the moment our API accepts a notification to <Term id="provider-handoff">provider handoff</Term>. Bulk notifications are <Term id="best-effort">best-effort</Term> and may take minutes.
+- **Availability:** the <Term id="ingestion-api">ingestion API</Term>, the endpoint producers call to submit notifications, is <Term id="availability-nines">99.99% available</Term> (≈ 53 min of downtime a year). Delivery may lag during incidents, but accepting requests must not stop.
+- **Durability:** once we return <Term id="http-202-accepted">`202 Accepted`</Term>, the notification is never silently lost. It is delivered, <Term id="suppression">suppressed</Term> by a rule, expired, moved to a <Term id="dead-letter-queue">dead-letter queue</Term>, or marked <Term id="indeterminate-outcome">indeterminate</Term>, and every outcome is recorded. The one exception is losing an entire region, where notifications accepted in the last few seconds may be lost or sent twice; [Regions](#regions) quantifies that.
 - **Delivery semantics:** <Term id="at-least-once-delivery">at-least-once</Term> internally, with deduplication at every layer so that users rarely see duplicates.
 
-Notice what is *not* on the list: exactly-once delivery and global ordering. We will see why both are expensive and why users do not need them.
+Notice what is *not* on the list: <Term id="exactly-once-delivery">exactly-once delivery</Term> and <Term id="global-ordering">global ordering</Term>. We will see why both are expensive and why users do not need them.
 
 ## Back-of-the-envelope estimation
 
@@ -82,32 +82,40 @@ We size the system in five steps: traffic, the provider calls that traffic turns
 
 Assume 200 million <Term id="dau">daily active users (DAU)</Term>, each receiving 5 notifications a day on average.
 
-- Notifications per day: 200M users × 5 = 1 billion
-- Average rate: 1B ÷ 86,400 seconds in a day ≈ 11.6k per second
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Notifications per day | 200M users × 5 | 1 billion |
+| Average rate | 1B ÷ 86,400 seconds in a day | ≈ 11.6k per second |
 
 Traffic is never flat. Morning commutes, campaign launches, and live events bunch it up, so assume the peak is five times the average.
 
-- Peak rate: 11.6k × 5 ≈ 58k per second
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Peak rate | 11.6k × 5 | ≈ 58k per second |
 
 Each notification goes out on one channel. Assume 60% are push, 25% in-app, 13% email, and 2% SMS.
 
-- Push: 1B × 60% = 600M per day
-- In-app: 1B × 25% = 250M per day
-- Email: 1B × 13% = 130M per day
-- SMS: 1B × 2% = 20M per day
+| Channel | Calculation | Per day |
+| --- | --- | --- |
+| Push | 1B × 60% | 600M |
+| In-app | 1B × 25% | 250M |
+| Email | 1B × 13% | 130M |
+| SMS | 1B × 2% | 20M |
 
 ### From notifications to provider calls
 
 Fifty-eight thousand notifications per second is not the number our providers see. A push goes to every device the user has, and some provider calls fail and are retried. Assume a push reaches 1.5 devices on average (some users have a phone and a tablet; some devices have no valid token), half of those devices run Android, and 3% of provider calls are retried. At peak:
 
-- Push notifications: 58k × 60% ≈ 34.7k per second
-- Push device sends: 34.7k × 1.5 devices ≈ 52k per second
-- Android device sends: 52k × 50% × 60 seconds ≈ 1.56M per minute
-- Email sends: 58k × 13% ≈ 7.5k per second
-- SMS sends: 58k × 2% ≈ 1.2k per second
-- In-app inbox writes, to our own store rather than a provider: 58k × 25% ≈ 14.5k per second
-- Provider calls: 52k push + 7.5k email + 1.2k SMS ≈ 61k per second
-- Provider attempts, counting retries: 61k × 1.03 ≈ 63k per second
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Push notifications | 58k × 60% | ≈ 34.7k per second |
+| Push device sends | 34.7k × 1.5 devices | ≈ 52k per second |
+| Android device sends | 52k × 50% × 60 seconds | ≈ 1.56M per minute |
+| Email sends | 58k × 13% | ≈ 7.5k per second |
+| SMS sends | 58k × 2% | ≈ 1.2k per second |
+| In-app inbox writes (our own store, not a provider) | 58k × 25% | ≈ 14.5k per second |
+| Provider calls | 52k push + 7.5k email + 1.2k SMS | ≈ 61k per second |
+| Provider attempts, counting retries | 61k × 1.03 | ≈ 63k per second |
 
 Sizing workers from the 58k figure would under-provision them by 8%. Sizing the FCM quota from it would be off by a third. Two of these numbers should make you stop.
 
@@ -121,8 +129,11 @@ We store six kinds of data, each with its own size and lifetime.
 
 **Notification records.** One record per notification holds its ids, category, template version, parameters, and status: about 500 bytes. We keep records for 90 days, for status queries and history.
 
-- Per day: 1B × 500 bytes = 500 GB
-- For 90 days: 500 GB × 90 = 45 TB, or 135 TB with three replicas
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Per day | 1B × 500 bytes | 500 GB |
+| For 90 days | 500 GB × 90 | 45 TB |
+| With three replicas | 45 TB × 3 | 135 TB |
 
 **Status events.** A channel delivery moves through up to four states that a caller can see:
 
@@ -133,24 +144,34 @@ We store six kinds of data, each with its own size and lifetime.
 
 A failure replaces the later states with *failed*, *bounced*, or *expired*, so a delivery still records at most four events. Push channels often produce fewer because they lack per-message delivery receipts, while the rare notification that escalates to a second channel creates a second delivery. We use four events per notification as a conservative rounded ceiling for capacity planning and measure the actual delivery multiplier in production. Each event is about 100 bytes.
 
-- Conservative ceiling per day: 1B notifications × 4 events × 100 bytes = 400 GB
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Per day (conservative ceiling) | 1B notifications × 4 events × 100 bytes | 400 GB |
 
-**The send log.** Before every provider call, a worker writes one row per *target*: one per device for push, one per address for email and SMS. That row is how it tells a safe retry from a duplicate (see [reliable delivery](#reliable-delivery)). A row holds the notification id, the target, its state, an attempt id, and a <Term id="lease">lease</Term>: about 100 bytes.
+**The send log.** Before every provider call, a worker writes one row per *target*: one per device for push, one per address for email and SMS. That row is how it tells a safe retry from a duplicate (see [reliable delivery](#reliable-delivery)). A row holds the notification id, the target, its state, an attempt id, and a <Term id="lease">lease</Term>: about 100 bytes. Rows only need to outlive retries, which stop when a notification's <Term id="ttl">time-to-live (TTL)</Term> passes. Most TTLs are a day or less, and we keep a row one more day as a safety margin, so a row lives about two days.
 
-- Rows per day: 600M push × 1.5 devices = 900M, plus 130M email and 20M SMS = 1.05B rows
-- Rows only need to outlive retries, which stop when a notification's <Term id="ttl">time-to-live (TTL)</Term> passes. Most TTLs are a day or less, and a row is kept one more day as a safety margin, so a row lives about two days: 1.05B rows × 100 bytes × 2 days ≈ 210 GB
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Rows per day | 600M push × 1.5 devices + 130M email + 20M SMS | 1.05B rows |
+| Storage, kept two days | 1.05B rows × 100 bytes × 2 days | ≈ 210 GB |
 
 **Device registry.** Assume 500M registered users with 2 devices each, at about 200 bytes per device.
 
-- 500M × 2 × 200 bytes = 200 GB
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Device registry | 500M users × 2 devices × 200 bytes | 200 GB |
 
 **Preferences.** About 1 KB per user.
 
-- 500M × 1 KB = 500 GB
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Preferences | 500M users × 1 KB | 500 GB |
 
 **In-app inbox.** 250M in-app notifications a day, kept for 30 days, at about 500 bytes each.
 
-- 250M × 30 days × 500 bytes = 3.75 TB
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| In-app inbox | 250M per day × 30 days × 500 bytes | 3.75 TB |
 
 Storage is large but unremarkable. The device registry and preferences fit comfortably in memory across a cache cluster, which matters because we read them for every notification.
 
@@ -158,26 +179,34 @@ Storage is large but unremarkable. The device registry and preferences fit comfo
 
 <Term id="littles-law">Little's law</Term> says the number of requests in flight equals the arrival rate times how long each request takes. Assume a provider call takes about 100 ms end to end.
 
-- In flight at peak: 63k per second × 0.1 s ≈ 6.3k requests
-- If providers slow to 1 s: 63k per second × 1 s ≈ 63k requests
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| In flight at peak | 63k per second × 0.1 s | ≈ 6.3k requests |
+| If providers slow to 1 s | 63k per second × 1 s | ≈ 63k requests |
 
 A provider that slows from 100 ms to 1 s multiplies our required concurrency by ten. A slow provider is often more dangerous than a dead one, because a dead one fails fast. We return to this in [Living with providers](#living-with-providers).
 
 Status updates, not notifications, are our heaviest write path. Using the conservative ceiling above:
 
-- Status writes at peak: 58k notifications per second × 4 events ≈ 232k writes per second
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Status writes at peak | 58k notifications per second × 4 events | ≈ 232k writes per second |
 
 [Scaling and bottlenecks](#scaling-and-bottlenecks) sizes the store for it. Finally, campaigns get a bulk budget of 40k notifications per second at peak, which leaves the rest of the capacity for transactional traffic.
 
-- A 50M-user campaign: 50M ÷ 40k per second = 1,250 seconds ≈ 21 minutes
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| A 50M-user campaign | 50M ÷ 40k per second = 1,250 seconds | ≈ 21 minutes |
 
 ### Cost
 
 Assume list prices: about $0.01 per SMS segment including carrier fees (Twilio's US base rate is $0.0083 per segment before them <Cite href="https://www.twilio.com/en-us/sms/pricing/us" title="SMS pricing in the United States" author="Twilio" />), $0.10 per 1,000 emails (Amazon SES's list price <Cite href="https://aws.amazon.com/ses/pricing/" title="Amazon SES pricing" author="Amazon Web Services" />), and nothing per push message.
 
-- SMS: 20M × $0.01 ≈ $200k per day, or about $73M per year
-- Email: 130M ÷ 1,000 × $0.10 ≈ $13k per day
-- Push: APNs and FCM charge nothing per message, so $0 beyond our own servers
+| Channel | Calculation | Cost |
+| --- | --- | --- |
+| SMS | 20M × $0.01 | ≈ $200k per day (≈ $73M per year) |
+| Email | 130M ÷ 1,000 × $0.10 | ≈ $13k per day |
+| Push | APNs and FCM charge nothing per message | $0 beyond our own servers |
 
 This changes the design more than any other number. SMS is 2% of our volume and about 94% of our provider spend ($200k of $213k a day). Real contracts are cheaper at this volume, but the ratio holds: every category that uses SMS must justify it, the channel-selection logic prefers push and in-app wherever the user allows them, and daily SMS spend gets an alert like any other service-level indicator. It also makes SMS the most attractive target for fraud, which we cover in [Security and privacy](#security-and-privacy).
 
@@ -473,7 +502,7 @@ What we retry depends on what the provider told us:
 | `400` bad request, payload too large      | Our bug                       | Do not retry; dead-letter and alert            |
 | APNs `410`, FCM `UNREGISTERED`            | The token is dead             | Do not retry; delete the token                 |
 
-After a fixed number of attempts, or once the notification's TTL passes, the message goes to a <Term id="dead-letter-queue">dead-letter queue</Term>. The DLQ is not a graveyard: it has an owner, an alert on its growth rate, and a replay tool, because the most common cause of dead letters is a bug we fix and then want to re-drive.
+After a fixed number of attempts, or once the notification's TTL passes, the message goes to a dead-letter queue. The DLQ is not a graveyard: it has an owner, an alert on its growth rate, and a replay tool, because the most common cause of dead letters is a bug we fix and then want to re-drive.
 
 **What about ordering?** Users notice when "Your order was delivered" arrives before "Your order shipped". It is tempting to demand global ordering. We do not, for two reasons. First, it is expensive: a single ordered stream cannot be parallelized, and our throughput depends on hundreds of partitions processed independently. Second, it is not achievable end to end anyway, because APNs, FCM, and email providers make no ordering promise across separate requests, and a retry naturally reorders a message behind later ones.
 

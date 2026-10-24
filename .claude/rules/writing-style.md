@@ -63,6 +63,12 @@ Write so that a reader can:
 - Percentiles as `p50`, `p99`, `p99.9`. Availability as `99.9%` with the
   equivalent downtime the first time it appears ("≈ 8.8 h/year").
 - Round aggressively in estimates and say so: "≈ 1,160 QPS → call it 1.2k".
+- When a number appears before it is derived, reassure in plain words ("Don't
+  worry about where these numbers come from yet; the next section works them
+  out step by step"), not a terse "(derived below)".
+- Name internal parts by what they do on first mention ("the ingestion API,
+  the endpoint producers call to submit notifications") and give jargon in
+  requirements a `<Term>` tooltip: readers meet it before the design explains it.
 
 ## Honesty rules
 

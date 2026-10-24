@@ -55,27 +55,33 @@ The platform covers:
 
 ## Back-of-the-envelope estimation
 
-{/* Each assumption is followed immediately by the calculation that uses it and a
-    plain (not bold) result. Units spelled out ("bytes", not "B"). Explain any number a reader
+{/* Each assumption is followed immediately by a small table of the calculations that
+    use it, with plain (not bold) results. Units spelled out ("bytes", not "B"). Explain any number a reader
     can't derive at a glance. */}
 
 ### Traffic
 
 **Assume … DAU, … per user per day.**
 
-- … × … = … per day
-- … ÷ 86,400 s ≈ … per second on average
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Per day | … × … | … |
+| Average rate | … ÷ 86,400 s | ≈ … per second |
 
 **Assume peaks run ×… the average.**
 
-- … × … ≈ … per second at peak
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Peak rate | … × … | ≈ … per second |
 
 ### Storage
 
 **Assume each record is about … bytes and is kept for ….**
 
-- … × … bytes ≈ … GB per day
-- … GB × 365 ≈ … TB per year
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Per day | … × … bytes | ≈ … GB |
+| Per year | … GB × 365 | ≈ … TB |
 
 ### At a glance
 

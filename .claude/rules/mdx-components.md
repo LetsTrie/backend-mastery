@@ -133,8 +133,7 @@ important content — the first tab must be sufficient on its own.
 ```
 
 ### `<Aside>`
-Tangential but interesting; renders in the margin on wide screens, inline on
-mobile. Must not contain anything required to follow the main text.
+Tangential but interesting; renders inline as a tinted note. Must not contain anything required to follow the main text.
 
 ---
 

@@ -70,12 +70,14 @@ never rename a token without updating print.
 - Prose sits in `text`, and so do tables, estimates, trade-offs, and code:
   their edges align with the paragraphs. Only `<Figure width="wide">` breaks out
   to `wide`; `full` is rare.
-- Beside the sidebar the reading grid is asymmetric: a small fixed gap on the
-  left, spare room on the right for margin notes. `--breakout` is 4.5rem.
-- `<Aside>` hangs in the right margin on ≥ 1408 px (9.5rem wide), inline below.
+- Beside the sidebar (≥ 1280 px) the text fills the column up to
+  `--measure-wide` (92ch), with a 2.5rem gap on the left and a 2rem breakout
+  gutter for wide figures; don't leave an empty right margin. Below that, text is
+  `--measure` (76ch) with `--breakout` (4.5rem) gutters.
+- `<Aside>` renders inline, as a tinted note, at every width.
 - Table of contents: sticky left rail on ≥ 1280 px, separated from the content
   by a 1 px right border, with scroll-spy (the active section is the last heading
-  scrolled past); collapsible "On this page" below.
+  scrolled past). Below 1280 px there is no table of contents.
 - Header height is `--header-height`; anchors use `scroll-padding-top`, never
   per-element offsets.
 
@@ -89,10 +91,10 @@ for whole-card links), `.section-label`, `.chapter-row`, `.nav-link`,
 ## Chapter page anatomy
 
 1. Eyebrow (chapter number, kind) · title · subtitle. No breadcrumb.
-2. Meta strip: author (icon + name, no "By"), published date, reading time,
-   status; `#tag` chips; a quiet notice for draft, review, or archived. No
-   diagram/source counts and no "updated" date in the header (revisions live in
-   the end matter).
+2. `#tag` chips, then a quiet notice for draft, review, or archived. No byline
+   strip on screen (no author, date, reading time, or counts); print shows a
+   one-line byline (author · date · URL) instead. Dates and revisions live in
+   the end matter.
 3. The body. Blueprint `##` sections are numbered (01, 02…)
    by CSS counters; the first paragraph gets a drop cap where supported.
 4. End matter: related chapters (chips), references, revision history, how to

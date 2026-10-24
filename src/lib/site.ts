@@ -16,10 +16,12 @@ export const site = {
   repoUrl: process.env.NEXT_PUBLIC_REPO_URL,
   locale: "en-US",
   /**
-   * Content license, shown in page metadata, Markdown exports, and llms.txt.
-   * Unset until the maintainers choose one (for example CC BY 4.0, which requires attribution).
+   * Content license, shown in the footer, page metadata, Markdown exports, and llms.txt.
+   * CC BY 4.0: anyone may share and adapt the content, including commercially, with attribution.
    */
-  license: undefined as { name: string; url: string } | undefined,
+  license: { name: "CC BY 4.0", url: "https://creativecommons.org/licenses/by/4.0/" } as
+    | { name: string; url: string }
+    | undefined,
 } as const;
 
 export function absoluteUrl(path: string) {

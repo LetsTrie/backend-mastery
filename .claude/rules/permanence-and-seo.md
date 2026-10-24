@@ -45,8 +45,9 @@ The publication is free to read for people and machines, and we want it cited.
 - Each chapter ends with **How to cite** (text + BibTeX) and emits Highwire
   `citation_*` meta tags for Google Scholar and reference managers.
 - The `.md` URL and citation format are permanent, like chapter URLs.
-- Content license: `site.license` in `src/lib/site.ts`. Unset until the
-  maintainers choose one; when set, it appears in metadata, Markdown, and llms.txt.
+- Content license: **CC BY 4.0** (`site.license` in `src/lib/site.ts`, and
+  `content/LICENSE.md`). It appears in the footer, JSON-LD, Markdown front
+  matter, and llms.txt. Changing it is a maintainer decision and needs an ADR.
 
 ## Accessibility (WCAG 2.2 AA minimum)
 

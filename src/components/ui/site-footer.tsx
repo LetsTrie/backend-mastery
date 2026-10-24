@@ -7,6 +7,16 @@ export function SiteFooter() {
       <div className="mx-auto flex max-w-[90rem] flex-wrap items-center justify-between gap-4 px-4 py-8 text-sm text-muted sm:px-6">
         <p>
           {site.name} · {site.tagline}
+          {site.license ? (
+            <>
+              {" "}
+              Content licensed under{" "}
+              <a href={site.license.url} rel="license" className="underline hover:text-text">
+                {site.license.name}
+              </a>
+              .
+            </>
+          ) : null}
         </p>
         <nav aria-label="Footer" className="flex gap-5">
           <Link href="/feed.xml" className="hover:text-text">

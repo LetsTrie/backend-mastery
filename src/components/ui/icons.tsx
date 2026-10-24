@@ -110,6 +110,12 @@ const paths = {
       <path d="M4.5 20.5A2.5 2.5 0 0 1 7 18h12.5v3H7" />
     </>
   ),
+  sidebar: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2.5" />
+      <path d="M9.5 4v16" />
+    </>
+  ),
   list: <path d="M9 6.5h11M9 12h11M9 17.5h11M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01" />,
   target: (
     <>

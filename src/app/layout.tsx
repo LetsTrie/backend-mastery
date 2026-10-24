@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { BackToTop } from "@/components/ui/back-to-top";
 import { SiteFooter } from "@/components/ui/site-footer";
 import { SiteHeader } from "@/components/ui/site-header";
-import { themeScript } from "@/components/ui/theme-toggle";
+import { prePaintScript } from "@/components/ui/pre-paint";
 import { site } from "@/lib/site";
 import { geist, geistMono, newsreader } from "./fonts";
 import "./globals.css";
@@ -35,7 +35,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       suppressHydrationWarning
     >
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <script dangerouslySetInnerHTML={{ __html: prePaintScript }} />
       </head>
       <body>
         <a href="#main" className="skip-link">

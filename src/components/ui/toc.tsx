@@ -1,6 +1,7 @@
 import type { TocItem } from "@/lib/content";
 import { Icon } from "./icons";
 import { TocSpy } from "./toc-spy";
+import { TocToggle } from "./toc-toggle";
 
 function TocList({ items }: { items: TocItem[] }) {
   return (
@@ -16,19 +17,24 @@ function TocList({ items }: { items: TocItem[] }) {
   );
 }
 
-/** Sticky left rail on wide screens, with scroll-spy. */
+/** Sticky left rail on wide screens, with scroll-spy. Collapsible to a single toggle button. */
 export function TocRail({ items }: { items: TocItem[] }) {
   return (
     <nav className="toc" aria-label="On this page">
-      <p className="toc-title">
-        <Icon name="list" size={15} />
-        On this page
-      </p>
-      <TocList items={items} />
-      <a href="#main" className="toc-top">
-        <Icon name="arrowUp" size={14} />
-        Back to top
-      </a>
+      <div className="toc-head">
+        <p className="toc-title">
+          <Icon name="list" size={15} />
+          On this page
+        </p>
+        <TocToggle controls="toc-panel" />
+      </div>
+      <div id="toc-panel" className="toc-panel">
+        <TocList items={items} />
+        <a href="#main" className="toc-top">
+          <Icon name="arrowUp" size={14} />
+          Back to top
+        </a>
+      </div>
       <TocSpy ids={items.map((item) => item.id)} />
     </nav>
   );

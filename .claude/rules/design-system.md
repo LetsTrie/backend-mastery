@@ -78,6 +78,12 @@ never rename a token without updating print.
 - Table of contents: sticky left rail on ≥ 1280 px, separated from the content
   by a 1 px right border, with scroll-spy (the active section is the last heading
   scrolled past). Below 1280 px there is no table of contents.
+- The rail collapses to a single toggle button (`TocToggle`, beside "On this
+  page"); collapsed, the article centers in the freed space. The choice persists
+  in `localStorage` and is restored before first paint by
+  `src/components/ui/pre-paint.ts`. Pre-paint scripts live in that plain module,
+  never in a `"use client"` file: a server component importing a value from a
+  client module gets a client reference, not the string.
 - Header height is `--header-height`; anchors use `scroll-padding-top`, never
   per-element offsets.
 
@@ -96,15 +102,16 @@ floating control; don't add others.
 
 ## Chapter page anatomy
 
-1. Eyebrow (chapter number, kind) · title · subtitle. No breadcrumb.
+1. Eyebrow (chapter number, kind) · title · subtitle · "Last updated <date>"
+   (from `updated`). No breadcrumb.
 2. `#tag` chips, then a quiet notice for draft, review, or archived. No byline
-   strip on screen (no author, date, reading time, or counts); print shows a
-   one-line byline (author · date · URL) instead. Dates and revisions live in
-   the end matter.
+   strip on screen (no author, published date, reading time, or counts); print
+   shows a one-line byline (author · date · URL) instead.
 3. The body. Blueprint `##` sections are numbered (01, 02…)
    by CSS counters; the first paragraph gets a drop cap where supported.
-4. End matter: related chapters (chips), references, revision history, how to
-   cite, edit/report links, previous/next cards.
+4. End matter: related chapters (chips), references and further reading, how
+   to cite, edit/report links, previous/next cards. The `revisions` frontmatter
+   is kept as a record but not rendered.
 5. A reading-progress hairline under the header (scroll-driven; absent where
    unsupported).
 

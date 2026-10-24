@@ -49,6 +49,27 @@
     .toc-rail:hover {
       scrollbar-color: var(--color-border-strong) transparent;
     }
+    /* Collapsed sidebar: only the toggle remains, and the article centers in the freed space. */
+    :root[data-toc="collapsed"] .chapter-layout {
+      grid-template-columns: 2.75rem minmax(0, 1fr);
+    }
+    :root[data-toc="collapsed"] .toc-rail {
+      padding-inline-end: 0;
+      border-inline-end: 0;
+      overflow: visible;
+    }
+    :root[data-toc="collapsed"] :is(.toc-title, .toc-panel) {
+      display: none;
+    }
+    :root[data-toc="collapsed"] .chapter-layout .reading-grid {
+      grid-template-columns:
+        [full-start] minmax(1rem, 1fr)
+        [wide-start] minmax(0, 2rem)
+        [text-start] min(var(--measure-wide), 100% - 2rem)
+        [text-end] minmax(0, 2rem)
+        [wide-end] minmax(1rem, 1fr)
+        [full-end];
+    }
     .toc-inline {
       display: none;
     }
@@ -103,6 +124,11 @@
   }
   .breadcrumb [aria-hidden] {
     color: var(--color-subtle);
+  }
+  .chapter-updated {
+    margin-top: 1rem;
+    font-size: var(--text-sm);
+    color: var(--color-muted);
   }
   .chapter-title {
     margin-top: 0.85rem;
@@ -181,8 +207,8 @@
   /* Blueprint sections are numbered like the chapters of a book. */
   .prose > h2 {
     counter-increment: section;
-    margin-top: 3.25rem;
-    padding-top: 1.75rem;
+    margin-top: 2.5rem;
+    padding-top: 1.25rem;
     border-top: 1px solid var(--color-border);
   }
   .prose > h2::before {
@@ -926,11 +952,24 @@
     font-size: var(--text-sm);
     line-height: 1.4;
   }
+  .toc-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+  .toc-toggle {
+    flex: none;
+    margin-inline-end: -0.5rem;
+  }
+  :root[data-toc="collapsed"] .toc-toggle {
+    margin-inline-end: 0;
+  }
   .toc-title {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    margin-bottom: 0.75rem;
     font-size: var(--text-xs);
     font-weight: 700;
     letter-spacing: var(--tracking-label);
@@ -1040,23 +1079,27 @@
     font-size: var(--text-sm);
     line-height: 1.5;
   }
-  .references li {
+  .references ol > li {
     display: grid;
     grid-template-columns: 2.25rem minmax(0, 1fr);
     padding-block: 0.25rem;
   }
-  .references li::before {
+  .references ol > li::before {
     content: "[" attr(value) "]";
     color: var(--color-subtle);
     font-variant-numeric: tabular-nums;
   }
-  .references li:target {
+  .references ol > li:target {
     background: var(--color-accent-soft);
     border-radius: var(--radius-sm);
   }
   .references ul {
     font-family: var(--font-ui);
     font-size: var(--text-sm);
+    line-height: 1.5;
+  }
+  .references ul > li {
+    padding-block: 0.25rem;
   }
   .how-to-cite {
     padding: 1.35rem 1.5rem;

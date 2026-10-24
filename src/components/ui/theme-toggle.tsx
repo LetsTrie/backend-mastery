@@ -2,9 +2,10 @@
 
 import { useSyncExternalStore } from "react";
 import { Icon, type IconName } from "./icons";
+import { THEME_STORAGE_KEY } from "./pre-paint";
 
 type Theme = "system" | "light" | "dark";
-const STORAGE_KEY = "theme";
+const STORAGE_KEY = THEME_STORAGE_KEY;
 const listeners = new Set<() => void>();
 const order: Theme[] = ["system", "light", "dark"];
 const labels: Record<Theme, string> = { system: "Auto", light: "Light", dark: "Dark" };
@@ -57,6 +58,3 @@ export function ThemeToggle() {
     </button>
   );
 }
-
-/** Runs before first paint so there is no flash of the wrong theme. */
-export const themeScript = `try{var t=localStorage.getItem("${STORAGE_KEY}");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}`;

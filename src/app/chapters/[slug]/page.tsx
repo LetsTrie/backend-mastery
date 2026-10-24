@@ -157,6 +157,9 @@ export default async function ChapterPage({ params }: PageProps<"/chapters/[slug
           ) : null}
           <h1 className="display chapter-title">{chapter.title}</h1>
           <p className="lede mt-5 text-xl">{chapter.subtitle}</p>
+          <p className="chapter-updated print-hide">
+            Last updated <time dateTime={chapter.updated}>{formatDate(chapter.updated)}</time>
+          </p>
 
           {/* No byline strip on screen; a printed copy still says who, when, and where. */}
           <p className="print-only chapter-meta">
@@ -260,22 +263,6 @@ export default async function ChapterPage({ params }: PageProps<"/chapters/[slug
                   </ul>
                 </>
               ) : null}
-            </section>
-          ) : null}
-
-          {chapter.revisions.length > 0 ? (
-            <section aria-labelledby="revision-history" className="end-section font-ui text-sm">
-              <h2 id="revision-history">Revision history</h2>
-              <ul className="list-none! ps-0!">
-                {chapter.revisions.map((r) => (
-                  <li key={`${r.date}-${r.note}`}>
-                    <time dateTime={r.date} className="text-muted tabular-nums">
-                      {r.date}
-                    </time>{" "}
-                    — {r.note}
-                  </li>
-                ))}
-              </ul>
             </section>
           ) : null}
 

@@ -1,6 +1,6 @@
 /**
  * Portable Markdown export of a chapter body: plain CommonMark + GFM (tables, footnotes),
- * no JSX. Used for "Copy as Markdown", `/chapters/<slug>.md`, and `llms-full.txt`.
+ * no JSX. Used for `/chapters/<slug>.md` and `llms-full.txt`.
  *
  * Every catalog component must have a mapping here (see .claude/rules/mdx-components.md);
  * the unit tests fail if one is missing.

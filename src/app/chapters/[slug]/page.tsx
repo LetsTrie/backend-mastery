@@ -3,9 +3,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getMdxComponents } from "@/components/mdx";
-import { ChapterActions } from "@/components/ui/chapter-actions";
 import { StatusBadge } from "@/components/ui/chapter-list";
 import { HowToCite } from "@/components/ui/how-to-cite";
+import { PrintPrep } from "@/components/ui/print-prep";
 import { TocInline, TocRail } from "@/components/ui/toc";
 import { chapterCitation } from "@/lib/cite";
 import {
@@ -181,7 +181,7 @@ export default async function ChapterPage({ params }: PageProps<"/chapters/[slug
             ))}
             <span className="print-only">{canonical}</span>
           </div>
-          <ChapterActions markdownHref={markdownPath(chapter.slug)} />
+          <PrintPrep />
           {chapter.status === "archived" ? (
             <p className="callout print-hide mt-6" data-type="warning" role="note">
               This chapter is archived. It stays online so existing links keep working, but it is no

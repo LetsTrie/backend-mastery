@@ -74,8 +74,8 @@ A named-line CSS grid on the article:
 
 ## Print and PDF
 
-Printing is a first-class output (`src/styles/print.css`): the "Print or save as
-PDF" button opens the browser dialog. Rules for anything that renders in a chapter:
+Printing is a first-class output (`src/styles/print.css`): readers print or save
+a PDF with the browser (Cmd/Ctrl+P); there is no print button by design. Rules for anything that renders in a chapter:
 
 - Site chrome and interactive-only elements get `print-hide`; print-only details
   (chapter kicker, canonical URL) get `print-only`.

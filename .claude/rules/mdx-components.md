@@ -25,7 +25,7 @@ only these components plus standard Markdown. Components live in
 - Every component needs a **Markdown export mapping** in
   `src/lib/content/markdown.ts` and an entry in `src/lib/content/catalog.ts`.
   The unit tests fail if a catalog component has no mapping. This export powers
-  "Copy as Markdown", `/chapters/<slug>.md`, and `/llms-full.txt`.
+  `/chapters/<slug>.md` and `/llms-full.txt`.
 
 ---
 

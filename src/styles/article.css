@@ -544,43 +544,6 @@
     font-weight: 650;
   }
 
-  /* ── Chapter actions (copy as Markdown, print) ───────────────────── */
-  .chapter-actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.5rem;
-    margin-top: 1.25rem;
-  }
-  .chapter-action {
-    display: inline-flex;
-    align-items: center;
-    padding: 0.35rem 0.75rem;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
-    background: var(--color-bg);
-    font-family: var(--font-ui);
-    font-size: var(--text-sm);
-    color: var(--color-text);
-    text-decoration: none;
-    cursor: pointer;
-  }
-  .chapter-action:hover {
-    border-color: var(--color-accent);
-  }
-  .chapter-action[data-state="copied"] {
-    border-color: var(--color-tip);
-    color: var(--color-tip);
-  }
-  .chapter-action[data-state="error"] {
-    border-color: var(--color-danger);
-    color: var(--color-danger);
-  }
-  .chapter-action--link {
-    border-color: transparent;
-    color: var(--color-muted);
-  }
-
   /* ── Table of contents ────────────────────────────────────────────── */
   .toc {
     font-family: var(--font-ui);

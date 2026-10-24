@@ -189,3 +189,11 @@ personalization:
 replay:
   term: Replay
   definition: Processing the same message a second time, for example when a worker crashes after doing the work but before recording that it finished. A replay carries the same notification id, so the system can recognize and drop it.
+
+short-code:
+  term: Short code
+  definition: A 5- or 6-digit phone number (such as 72345) leased for high-volume business texting. Carriers vet it in advance, so it may send far faster than an ordinary number.
+
+toll-free-number:
+  term: Toll-free number
+  definition: A 10-digit number with a toll-free prefix such as 800 or 888, usable for business texting after verification. Cheaper and quicker to get than a short code, but much slower to send from by default.

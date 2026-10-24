@@ -121,7 +121,14 @@ Sizing workers from the 58k figure would under-provision them by 8%. Sizing the 
 
 First, **1.56M Android messages per minute**. FCM's HTTP v1 API enforces a per-project quota that counts messages, not requests, and the default is 600k messages per minute <Cite href="https://firebase.google.com/docs/cloud-messaging/throttling-and-quotas" title="FCM throttling and quotas" author="Firebase" />. Our peak is 2.6 times that. A standing increase is at most 25% per request, and only when usage has regularly reached 80% of the current quota and the client error ratio stays under 5%. From 600k, that is five consecutive increases (600k → 750k → 938k → 1.17M → 1.46M → 1.83M), each earned by running close to the previous limit. This is a capacity-planning conversation that starts months before launch, not on launch day.
 
-Second, **1.2k SMS per second**. SMS throughput is allocated per sender. Twilio's documented defaults are 3 <Term id="sms-segment">message segments</Term> per second for a US toll-free number and 100 per second for a short code <Cite href="https://support.twilio.com/hc/en-us/articles/115002943027-Understanding-Twilio-Rate-Limits-and-Message-Queues" title="Understanding Twilio rate limits and message queues" author="Twilio" />. Our peak is about 12 short codes' worth of default throughput.
+Second, **1.2k SMS per second**. Unlike push, SMS has a speed limit for each phone number we send *from*. Carriers cap how many messages a single sender number may send per second, so the only way to send faster is to send from more numbers. Twilio documents two common defaults <Cite href="https://support.twilio.com/hc/en-us/articles/115002943027-Understanding-Twilio-Rate-Limits-and-Message-Queues" title="Understanding Twilio rate limits and message queues" author="Twilio" />: a US <Term id="toll-free-number">toll-free number</Term> sends 3 <Term id="sms-segment">message segments</Term> per second, and a <Term id="short-code">short code</Term> sends 100. Our SMS are short (login codes, alerts) and fit in one segment each, so messages and segments are the same count here.
+
+| Sender number    | Default speed  | Numbers needed for 1.2k per second |
+| ---------------- | -------------- | ---------------------------------- |
+| Toll-free number | 3 per second   | 1,200 ÷ 3 = 400                    |
+| Short code       | 100 per second | 1,200 ÷ 100 = 12                   |
+
+So at peak we need about 12 short codes, and the SMS workers must spread messages across them. Short codes also take weeks of carrier approval, which [Living with providers](#living-with-providers) plans for.
 
 ### Storage
 

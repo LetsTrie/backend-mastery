@@ -66,7 +66,9 @@ These URLs are permanent. See `permanence-and-seo.md`.
   preview builds only, never listed, never in production. Working files like
   `outline.md` are never rendered.
 - Cache Components are **off** (ADR 0002). Dynamic segments export
-  `dynamicParams = false` and `generateStaticParams`.
+  `dynamicParams = false` and `generateStaticParams`. In `pnpm dev`, the param
+  list is cached: after creating a **new chapter folder**, restart the dev
+  server or the new URL returns 404. Edits to existing chapters hot-reload.
 - Figures are served from `content/` by the static route
   `/chapters/[slug]/figures/[file]`; never copy them into `public/`.
 - MDX plugins may depend only on the MDX source (compiled output is cached by

@@ -117,7 +117,13 @@ for (const folder of folders) {
   const file = path.join(CHAPTERS_DIR, folder, "index.mdx");
   const shown = rel(file);
   if (!existsSync(file)) {
-    report("error", rel(path.dirname(file)), "structure", "chapter folder has no index.mdx");
+    const outlineOnly = existsSync(path.join(CHAPTERS_DIR, folder, "outline.md"));
+    report(
+      outlineOnly ? "warning" : "error",
+      rel(path.dirname(file)),
+      "structure",
+      outlineOnly ? "outline only — awaiting approval to draft" : "chapter folder has no index.mdx",
+    );
     continue;
   }
 

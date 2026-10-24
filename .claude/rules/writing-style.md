@@ -81,6 +81,10 @@ Write so that a reader can:
 
 ## Length
 
-- Case-study chapters: **4,000–9,000 words**, 25–45 min read, 8–15 figures.
-- Building-block chapters (caching, consistent hashing, …): 2,500–6,000 words.
-- Length is an outcome, not a goal. Cut anything that doesn't serve a decision.
+- **No word limits.** Chapters are as long as the topic needs to be complete
+  and comprehensive. Never trim a useful explanation, example, figure, or deep
+  dive to hit a number.
+- Depth, not padding: every section must still earn its place with a decision,
+  an insight, a number, or a figure. Cut repetition and filler, never substance.
+- Long chapters stay navigable through the fixed blueprint headings, the table
+  of contents, `<KeyTakeaways>`, and the Summary.

@@ -43,6 +43,12 @@ classes: {
 
   # ── Edges ────────────────────────────────────────────────────────────
   async: {style.stroke-dash: 5}
+  # ER diagrams: a column that refers to another table's key. Draw with `<->` so both ends
+  # render: crow's foot (many) at the referring column, a bar (exactly one) at the key.
+  reference: {
+    source-arrowhead.shape: cf-many
+    target-arrowhead.shape: cf-one-required
+  }
   failure: {
     style.stroke: "#C0392B"
     style.font-color: "#C0392B"

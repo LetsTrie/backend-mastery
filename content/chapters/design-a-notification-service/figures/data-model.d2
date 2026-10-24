@@ -1,7 +1,6 @@
 ...@../../../_shared/d2/base
 
-grid-columns: 3
-grid-gap: 48
+direction: right
 
 notifications_by_user: {
   shape: sql_table
@@ -17,7 +16,7 @@ notifications_by_user: {
 
 deliveries: {
   shape: sql_table
-  notification_id: text {constraint: primary_key}
+  notification_id: text {constraint: [primary_key; foreign_key]}
   channel: text {constraint: primary_key}
   state: text
   attempts: int
@@ -26,7 +25,7 @@ deliveries: {
 
 send_log: {
   shape: sql_table
-  notification_id: text {constraint: primary_key}
+  notification_id: text {constraint: [primary_key; foreign_key]}
   target: text {constraint: primary_key}
   state: text
   attempt_id: uuid
@@ -38,7 +37,7 @@ inbox_by_user: {
   shape: sql_table
   user_id: uuid {constraint: primary_key}
   created_at: timestamp {constraint: primary_key}
-  notification_id: text {constraint: primary_key}
+  notification_id: text {constraint: [primary_key; foreign_key]}
   title: text
   body: text
   read_at: timestamp
@@ -56,6 +55,13 @@ devices: {
 device_by_token: {
   shape: sql_table
   token_hash: blob {constraint: primary_key}
-  user_id: uuid
-  device_id: uuid
+  user_id: uuid {constraint: foreign_key}
+  device_id: uuid {constraint: foreign_key}
 }
+
+# Logical references, kept by the application: a wide-column store enforces no foreign keys.
+deliveries.notification_id <-> notifications_by_user.notification_id: {class: reference}
+send_log.notification_id <-> notifications_by_user.notification_id: {class: reference}
+inbox_by_user.notification_id <-> notifications_by_user.notification_id: {class: reference}
+send_log.target <-> devices.device_id: {class: reference}
+device_by_token.device_id <-> devices.device_id: {class: reference}

@@ -74,6 +74,11 @@ Edges:
   message. Label edges with the verb or protocol: `"enqueue"`, `"gRPC"`, `"HTTPS"`.
 - Numbered steps prefix the edge label with circled digits (`"① enqueue"`,
   `"② dispatch"`) and match the `<Steps>` list in the prose one-to-one.
+- ER diagrams (`sql_table`) always draw their references: link the referring
+  column to the key it points to with `a.col <-> b.key: {class: reference}`
+  (crow's foot = many, double bar = exactly one; `<->` so both ends render), and
+  mark the column `{constraint: foreign_key}` (or `[primary_key; foreign_key]`).
+  Keep edge labels off ER links; explain special cases in the caption.
 - Failure / error paths use `class: failure` (dashed, red, always labeled).
 - Highlight the part a deep dive focuses on with `class: focus` (accent color);
   everything else stays neutral. At most one focused area per figure.

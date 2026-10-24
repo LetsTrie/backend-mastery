@@ -296,8 +296,8 @@ Our access patterns drive the storage choices:
 <Figure
   id="data-model"
   src="./figures/data-model.svg"
-  alt="Six tables. Notifications by user, keyed by user, creation time, and notification id. Deliveries keyed by notification id and channel. Send log keyed by notification id and target, with state, attempt id, lease expiry, and epoch. Inbox by user, keyed by user, creation time, and notification id, with title, body, and read time. Devices keyed by user and device. Device by token, keyed by a hash of the token, pointing to the user and device."
-  caption="Core tables. Each table serves one access pattern; ordering and identity are separate columns."
+  alt="Six tables. Notifications by user, keyed by user, creation time, and notification id. Deliveries keyed by notification id and channel. Send log keyed by notification id and target, with state, attempt id, lease expiry, and epoch. Inbox by user, keyed by user, creation time, and notification id, with title, body, and read time. Devices keyed by user and device. Device by token, keyed by a hash of the token, pointing to the user and device. Lines link the notification id in deliveries, send log, and inbox to the notification it belongs to, and link the send log's target and the token lookup to a device; each link is many rows to one."
+  caption="Core tables. Each line joins a column to the key it refers to: crow's foot for many rows, double bar for exactly one. The application keeps these links; the store does not enforce foreign keys. For push, a send-log target is a device."
   width="wide"
 />
 

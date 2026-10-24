@@ -2,30 +2,30 @@
 
 direction: down
 
-in: Request topic {class: queue}
+in: Request topics {class: queue}
 
 processor: Notification processor {
   class: boundary
   direction: down
   dedup: "1. Deduplicate" {class: service}
   prefs: "2. Preferences and opt-outs" {class: service}
-  quiet: "3. Quiet hours and send-at" {class: service}
-  caps: "4. Frequency caps" {class: service}
-  aggregate: "5. Aggregate" {class: service}
-  select: "6. Select channels" {class: service}
-  render: "7. Render templates" {class: service}
+  aggregate: "3. Aggregate" {class: service}
+  select: "4. Select channels" {class: service}
+  caps: "5. Frequency caps" {class: service}
+  render: "6. Render" {class: service}
+  route: "7. Send now or hold" {class: service}
 
-  dedup -> prefs -> quiet -> caps -> aggregate -> select -> render
+  dedup -> prefs -> aggregate -> select -> caps -> render -> route
 }
 
 out: Channel topics {class: queue}
 suppressed: Suppression log {class: datastore}
-delayed: Scheduler {class: job}
+scheduler: Scheduler {class: job}
 
 in -> processor.dedup {class: async}
-processor.render -> out {class: async}
+processor.route -> out: "now" {class: async}
+processor.route -> scheduler: "quiet hours, send-at" {class: async}
 processor.dedup -> suppressed: "duplicate" {class: async}
 processor.prefs -> suppressed: "opted out" {class: async}
 processor.caps -> suppressed: "over cap" {class: async}
-processor.quiet -> delayed: "hold until window opens" {class: async}
-processor.aggregate -> delayed: "hold for digest window" {class: [async; focus]}
+processor.aggregate -> scheduler: "digest window" {class: [async; focus]}

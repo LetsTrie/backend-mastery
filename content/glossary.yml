@@ -34,6 +34,10 @@ fan-out:
   definition: Delivering one logical event to many recipients or downstream consumers.
   owner: design-a-news-feed
 
+fencing-token:
+  term: Fencing token
+  definition: A number that increases every time ownership of a resource changes; storage rejects any write carrying an older number, so a stale owner that wakes up late cannot act.
+
 head-of-line-blocking:
   term: Head-of-line blocking
   definition: When work at the front of a queue is slow or stuck, everything behind it waits, even if that later work is urgent or would be fast.

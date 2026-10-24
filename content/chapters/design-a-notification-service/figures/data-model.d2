@@ -1,29 +1,47 @@
 ...@../../../_shared/d2/base
 
-direction: right
+grid-columns: 3
+grid-gap: 48
 
-notifications: {
+notifications_by_user: {
   shape: sql_table
   user_id: uuid {constraint: primary_key}
-  notification_id: timeuuid {constraint: primary_key}
+  created_at: timestamp {constraint: primary_key}
+  notification_id: text {constraint: primary_key}
   category: text
   template_id: text
   template_version: int
   params: blob
-  priority: text
   status: text
-  read_at: timestamp
-  expires_at: timestamp
 }
 
 deliveries: {
   shape: sql_table
-  notification_id: timeuuid {constraint: primary_key}
+  notification_id: text {constraint: primary_key}
   channel: text {constraint: primary_key}
   state: text
-  attempt: int
-  provider_msg_id: text
+  attempts: int
   updated_at: timestamp
+}
+
+send_log: {
+  shape: sql_table
+  notification_id: text {constraint: primary_key}
+  target: text {constraint: primary_key}
+  state: text
+  attempt_id: uuid
+  lease_until: timestamp
+  epoch: int
+}
+
+inbox_by_user: {
+  shape: sql_table
+  user_id: uuid {constraint: primary_key}
+  created_at: timestamp {constraint: primary_key}
+  notification_id: text {constraint: primary_key}
+  title: text
+  body: text
+  read_at: timestamp
 }
 
 devices: {
@@ -31,20 +49,13 @@ devices: {
   user_id: uuid {constraint: primary_key}
   device_id: uuid {constraint: primary_key}
   platform: text
-  token: text {constraint: unique}
-  app_version: text
+  token: text
   last_seen: timestamp
 }
 
-preferences: {
+device_by_token: {
   shape: sql_table
-  user_id: uuid {constraint: primary_key}
-  timezone: text
-  quiet_hours: text
-  channel_matrix: blob
-  updated_at: timestamp
+  token_hash: blob {constraint: primary_key}
+  user_id: uuid
+  device_id: uuid
 }
-
-notifications.notification_id -> deliveries.notification_id
-notifications.user_id -> devices.user_id
-notifications.user_id -> preferences.user_id

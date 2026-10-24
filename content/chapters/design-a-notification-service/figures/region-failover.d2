@@ -1,0 +1,38 @@
+...@../../../_shared/d2/base
+
+direction: down
+
+producers: Producer services {class: service}
+directory: "User directory\n(home region, epoch)" {class: datastore}
+
+pair: Paired regions {
+  class: boundary
+  direction: right
+
+  a: "Region A (lost)" {
+    class: boundary
+    direction: down
+    topics: Request topics {class: queue}
+    state: "Send log, caps,\nschedule, inbox" {class: datastore}
+  }
+
+  b: "Region B (new home)" {
+    class: boundary
+    direction: down
+    api: Notification API {class: service}
+    topics: Mirrored topics {class: queue}
+    workers: Processors and workers {class: service}
+    state: Replicated state {class: datastore}
+    api -> topics -> workers
+    workers -> state
+  }
+
+  a.topics -> b.topics: "async mirror" {class: async}
+  a.state -> b.state: "async replication" {class: async}
+}
+
+providers: Providers {class: external}
+
+directory -> pair.b.workers: "① home = B, epoch 8" {class: focus}
+producers -> pair.b.api: "② route to new home"
+pair.b.workers -> providers: "③ send; claims carry epoch 8"

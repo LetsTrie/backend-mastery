@@ -3,10 +3,19 @@
 direction: down
 
 producers: Producer services {class: service}
+fanout: Campaign fan-out {class: service}
 api: Notification API {class: service}
-idem: Idempotency store {class: cache}
-requests: Request topic {class: queue}
-processor: Notification processor {class: service}
+idem: "Idempotency\nstore" {class: cache}
+
+requests: Request topics {
+  class: boundary
+  direction: right
+  high: high {class: queue}
+  normal: normal {class: queue}
+  batch: "campaign\npages" {class: queue}
+}
+
+processors: "Processor pools\n(one per request topic)" {class: service}
 
 lookups: Lookups {
   class: boundary
@@ -16,15 +25,8 @@ lookups: Lookups {
   templates: Templates {class: datastore}
 }
 
-channels: Channel topics {
-  class: boundary
-  grid-columns: 2
-  push: push {class: queue}
-  email: email {class: queue}
-  sms: sms {class: queue}
-  inapp: in-app {class: queue}
-}
-
+scheduler: Scheduler {class: job}
+channels: "Channel topics\n(push, email, SMS, in-app ×\nhigh, normal, bulk lanes)" {class: queue}
 workers: Channel workers {class: service}
 providers: "Providers (APNs, FCM, email, SMS)" {class: external}
 inbox: Inbox store {class: datastore}
@@ -32,14 +34,18 @@ tracking: Tracking service {class: service}
 status: Status store {class: datastore}
 
 producers -> api: "① POST /v1/notifications"
-api -> idem: "② check key"
-api -> requests: "③ append, then 202" {class: async}
-requests -> processor: "④ consume" {class: async}
-processor -> lookups: "⑤ look up, render"
-processor -> channels: "⑥ one message per channel" {class: async}
-channels -> workers: {class: async}
+api -> idem: "② record key"
+api -> requests.high: "③ append by priority, then 202" {class: async}
+api -> requests.normal {class: async}
+fanout -> requests.batch: "pages" {class: async}
+requests -> processors: "④ consume" {class: async}
+processors -> lookups: "⑤ look up, decide, render"
+processors -> scheduler: "hold" {class: async}
+scheduler -> channels: "release" {class: async}
+processors -> channels: "⑥ one message per channel" {class: async}
+channels -> workers {class: async}
 workers -> providers: "⑦ send" {class: focus}
-workers -> inbox: "⑦ write"
-providers -> tracking: "⑧ delivery webhooks" {class: async}
+workers -> inbox: "⑧ write"
+providers -> tracking: "⑨ delivery webhooks" {class: async}
 tracking -> status
 workers -> status: "sent / failed"

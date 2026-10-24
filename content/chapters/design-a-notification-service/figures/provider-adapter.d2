@@ -7,20 +7,21 @@ worker: Channel worker {class: service}
 adapter: Provider adapter {
   class: boundary
   direction: down
-  limiter: Rate limiter {class: gateway}
+  auth: Cached auth token {class: cache}
+  limiter: Rate limiter (AIMD) {class: gateway}
   breaker: Circuit breaker {class: gateway}
   limiter -> breaker: "② within quota"
 }
 
 primary: Primary provider {class: external}
-secondary: Secondary provider {class: external}
+secondary: "Secondary provider\n(email, SMS only)" {class: external}
 tracking: Tracking service {class: service}
 status: Status store {class: datastore}
 devices: Device registry {class: datastore}
 
 worker -> adapter.limiter: "① send"
-adapter.breaker -> primary: "③ breaker closed"
-adapter.breaker -> secondary: "③ breaker open: fail over" {class: focus}
+adapter.breaker -> primary: "③ closed: send with cached token"
+adapter.breaker -> secondary: "③ open: fail over, or pause the consumer" {class: focus}
 primary -> tracking: "④ delivery webhook" {class: async}
 secondary -> tracking: "④ delivery webhook" {class: async}
 tracking -> status: "⑤ record state"

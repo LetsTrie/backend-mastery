@@ -2,22 +2,17 @@
 
 direction: down
 
-writers: "" {
-  class: boundary
-  direction: right
-  style.stroke: transparent
-  processor: Notification processor {class: service}
-  campaigns: Campaign service {class: service}
-}
+processor: Notification processor {class: service}
+campaigns: Campaign service {class: service}
 
-due: "Due-time table\n(partitioned by minute)" {class: datastore}
-sweeper: Sweeper {class: job}
-lanes: Priority lanes {class: queue}
+due: "Due-time table\n((due_minute, shard), id)" {class: datastore}
+sweeper: "Sweepers\n(one lease per minute × shard)" {class: job}
+target: "Row's target topic\n(channel lane, request topic,\nor fan-out job)" {class: queue}
 suppressed: Suppression log {class: datastore}
 
-writers.processor -> due: "① write (due_minute, id)"
-writers.campaigns -> due: "① write"
-due -> sweeper: "② read current minute"
-sweeper -> due: "③ claim: pending → released" {class: focus}
-sweeper -> lanes: "④ publish" {class: async}
-sweeper -> suppressed: "TTL already passed → expired" {class: failure}
+processor -> due: "① write, jittered due time"
+campaigns -> due: "① one row per UTC offset"
+due -> sweeper: "② read own shard, claim with lease" {class: focus}
+sweeper -> target: "③ publish" {class: async}
+sweeper -> due: "④ mark released"
+sweeper -> suppressed: "TTL passed → expired" {class: failure}

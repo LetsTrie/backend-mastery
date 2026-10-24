@@ -67,7 +67,7 @@ These URLs are permanent. See `permanence-and-seo.md`.
   `outline.md` are never rendered.
 - Cache Components are **off** (ADR 0002). Dynamic segments export
   `dynamicParams = false` and `generateStaticParams`. In `pnpm dev`, the param
-  list is cached: after creating a **new chapter folder**, restart the dev
+  list is cached: after creating a **new chapter folder or a new figure file**, restart the dev
   server or the new URL returns 404. Edits to existing chapters hot-reload.
 - Figures are served from `content/` by the static route
   `/chapters/[slug]/figures/[file]`; never copy them into `public/`.

@@ -61,7 +61,7 @@ with any ❌.
 
 **Writing**
 - [ ] Voice and banned words per `writing-style.md`.
-- [ ] Acronyms defined on first use; `<Term>` on first glossary occurrence.
+- [ ] Acronyms defined on first use; `<Term>` on the first glossary occurrence in each `##` section.
 - [ ] Code blocks have language + title, ≤ 30 lines, valid syntax.
 - [ ] Description 120–160 chars; title ≤ 60 chars.
 

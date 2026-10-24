@@ -825,15 +825,22 @@
   .term {
     position: relative;
   }
-  .term a {
-    color: inherit;
+  .term-trigger {
+    cursor: help;
+    border-radius: 2px;
     text-decoration: underline dotted;
     text-decoration-color: color-mix(in oklab, var(--color-accent) 70%, transparent);
     text-decoration-thickness: 1.5px;
     text-underline-offset: 0.25em;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .term[data-open] .term-trigger {
+    text-decoration-style: solid;
+    text-decoration-color: var(--color-accent);
   }
   .term-tip {
     position: absolute;
+    translate: var(--tip-shift, 0) 0;
     inset-inline-start: 0;
     bottom: calc(100% + 0.6rem);
     z-index: 20;
@@ -856,8 +863,21 @@
     margin-bottom: 0.2rem;
     color: var(--color-text);
   }
-  .term:hover .term-tip,
-  .term:focus-within .term-tip {
+  /* Too close to the header: open below the term instead. */
+  .term-tip[data-place="below"] {
+    top: calc(100% + 0.6rem);
+    bottom: auto;
+  }
+  /* Shown on hover (real pointers only, so taps don't leave it stuck), keyboard focus, or
+     a click/tap toggle (data-open, set by <TermTips />). */
+  @media (hover: hover) {
+    .term:hover .term-tip {
+      display: block;
+      animation: tip-in var(--duration-base) var(--ease-out);
+    }
+  }
+  .term:has(.term-trigger:focus-visible) .term-tip,
+  .term[data-open] .term-tip {
     display: block;
     animation: tip-in var(--duration-base) var(--ease-out);
   }
@@ -865,6 +885,19 @@
     from {
       opacity: 0;
       transform: translateY(4px);
+    }
+  }
+  /* Small screens: a card pinned to the bottom of the viewport, so it always fits. */
+  @media (max-width: 40rem) {
+    .term-tip,
+    .term-tip[data-place="below"] {
+      position: fixed;
+      inset: auto 0.75rem max(0.75rem, env(safe-area-inset-bottom)) 0.75rem;
+      z-index: 60;
+      width: auto;
+      max-width: none;
+      translate: none;
+      font-size: var(--text-md);
     }
   }
 

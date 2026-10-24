@@ -97,11 +97,15 @@ Decision record table. Columns are fixed.
 ```
 
 ### `<Term>`
-Glossary link with hover/focus definition from `content/glossary.yml`.
+Glossary term with an in-place definition from `content/glossary.yml` (a
+toggletip): hover or keyboard focus shows it, click/tap toggles it, and it never
+navigates. On small screens it opens as a card pinned to the bottom of the
+viewport. Page-level wiring: `<TermTips />` in the chapter route.
 ```mdx
 <Term id="idempotency-key">idempotency key</Term>
 ```
-Use on the **first** occurrence per chapter only. Use it generously: every
+Use on the **first** occurrence per `##` section (readers often jump straight
+to a section). Use it generously: every
 acronym, protocol, or technique a mid-level engineer might not know cold
 (APNs, TTL, Little's law, AIMD, RPO…) gets a glossary entry and a `<Term>`.
 Add the entry to `content/glossary.yml` first; a missing id fails content lint.

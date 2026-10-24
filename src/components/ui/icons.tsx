@@ -163,7 +163,7 @@ export function Icon({
   );
 }
 
-/** The Backend Mastery mark: three layers of a stack, darkest at the base. */
+/** The Backend Mastery mark: a "B" monogram, matching the favicon (src/app/icon.svg). */
 export function LogoMark({ size = 26 }: { size?: number }) {
   return (
     <svg
@@ -175,10 +175,14 @@ export function LogoMark({ size = 26 }: { size?: number }) {
       focusable="false"
       className="logo-mark"
     >
-      <rect width="32" height="32" rx="8" fill="var(--color-text)" />
-      <rect x="7" y="7.5" width="18" height="4.5" rx="2.25" fill="var(--color-accent)" opacity="0.45" />
-      <rect x="7" y="13.75" width="18" height="4.5" rx="2.25" fill="var(--color-accent)" opacity="0.72" />
-      <rect x="7" y="20" width="18" height="4.5" rx="2.25" fill="var(--color-accent)" />
+      <rect width="32" height="32" rx="8" fill="var(--color-accent)" />
+      <path
+        d="M10 6.5h7.5a4.75 4.75 0 0 1 0 9.5H10zm0 9.5h8.5a4.75 4.75 0 0 1 0 9.5H10z"
+        fill="none"
+        stroke="var(--color-accent-contrast)"
+        strokeWidth="2.75"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }

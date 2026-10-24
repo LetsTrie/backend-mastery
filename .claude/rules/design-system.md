@@ -121,6 +121,9 @@ floating control; don't add others.
 - Focus rings always visible (`:focus-visible`), 2 px, accent color, offset.
 - Motion only clarifies or responds to the reader (hover, scroll position, TOC
   marker). Nothing animates on its own. Respect `prefers-reduced-motion`.
+- Logo: a "B" monogram (`LogoMark`, and `src/app/icon.svg` for the favicon) on an
+  ember square. Never stacked horizontal bars: at the top-left they read as a
+  menu button.
 - Icons: the set in `src/components/ui/icons.tsx` (24 px grid, 1.75 stroke,
   currentColor). Decorative icons are `aria-hidden`; icon-only buttons get a label.
 - Hidden overlays (tooltips) use `display: none`, never `visibility: hidden`, so

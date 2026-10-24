@@ -33,7 +33,7 @@ Be a demanding senior reviewer. The goal is a chapter readers trust for years.
 6. **Citations** — every claim about a named company/product has a `<Cite>`.
    Spot-check that URLs are reachable and say what the chapter claims
    (use WebFetch). Flag anything that looks fabricated.
-7. **Style** — banned words, voice, acronym definitions, `<Term>` first use,
+7. **Style** — banned words, voice, acronym definitions, `<Term>` first use per `##` section,
    heading case, code block language + title, unit formatting.
 8. **Permanence** — if `status` is `published`, diff against `main`
    (`git diff main -- content/chapters/$ARGUMENTS`) and flag any changed slug,

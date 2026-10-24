@@ -32,6 +32,22 @@ from docs, Slack, and interview prep notes for years. Never break them.
 - Full-content RSS/Atom; sitemap with `lastmod` from `updated`.
 - No drafts in sitemap, feeds, or production builds.
 
+## Machine-readable and citable
+
+The publication is free to read for people and machines, and we want it cited.
+
+- Every chapter has a Markdown twin at `/chapters/<slug>.md` (front matter with
+  canonical URL and a suggested citation; figures as absolute image links with
+  alt text; citations as footnotes). It is linked from the page head
+  (`rel="alternate" type="text/markdown"`) and from JSON-LD `encoding`.
+- `/llms.txt` indexes published chapters; `/llms-full.txt` contains them all.
+- `robots.txt` allows all crawlers and names AI crawlers explicitly.
+- Each chapter ends with **How to cite** (text + BibTeX) and emits Highwire
+  `citation_*` meta tags for Google Scholar and reference managers.
+- The `.md` URL and citation format are permanent, like chapter URLs.
+- Content license: `site.license` in `src/lib/site.ts`. Unset until the
+  maintainers choose one; when set, it appears in metadata, Markdown, and llms.txt.
+
 ## Accessibility (WCAG 2.2 AA minimum)
 
 - Text contrast ≥ 4.5:1 (body) and ≥ 3:1 (large text, UI, diagram strokes),

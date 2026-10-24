@@ -7,6 +7,7 @@ import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { z } from "zod";
 import { analyzeMdx } from "../src/lib/content/analyze";
+import { CALLOUT_LABELS, MDX_COMPONENTS } from "../src/lib/content/catalog";
 import { CHAPTERS_DIR, resolveFigure } from "../src/lib/content/figures";
 import {
   authorsSchema,
@@ -55,21 +56,8 @@ const BLUEPRINTS: Record<string, string[]> = {
 };
 
 /** The MDX component catalog (.claude/rules/mdx-components.md). */
-const CATALOG = new Set([
-  "KeyTakeaways",
-  "Figure",
-  "FigRef",
-  "Callout",
-  "Estimate",
-  "Tradeoffs",
-  "Term",
-  "Cite",
-  "Steps",
-  "Tabs",
-  "Tab",
-  "Aside",
-]);
-const CALLOUT_TYPES = new Set(["note", "tip", "warning", "pitfall", "interview"]);
+const CATALOG = new Set<string>(MDX_COMPONENTS);
+const CALLOUT_TYPES = new Set(Object.keys(CALLOUT_LABELS));
 
 function loadYaml<T extends z.ZodType>(file: string, schema: T): z.infer<T> | undefined {
   const absolute = path.join(CONTENT_DIR, file);

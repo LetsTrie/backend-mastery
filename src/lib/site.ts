@@ -15,6 +15,11 @@ export const site = {
   /** e.g. https://github.com/org/backend-mastery — enables "Edit" and "Report an error" links. */
   repoUrl: process.env.NEXT_PUBLIC_REPO_URL,
   locale: "en-US",
+  /**
+   * Content license, shown in page metadata, Markdown exports, and llms.txt.
+   * Unset until the maintainers choose one (for example CC BY 4.0, which requires attribution).
+   */
+  license: undefined as { name: string; url: string } | undefined,
 } as const;
 
 export function absoluteUrl(path: string) {

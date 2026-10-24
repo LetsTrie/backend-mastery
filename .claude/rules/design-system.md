@@ -72,6 +72,22 @@ A named-line CSS grid on the article:
 - Motion: only to clarify (e.g. TOC highlight). Respect `prefers-reduced-motion`.
 - Icons: one icon set, outline style, used sparingly and always with a label.
 
+## Print and PDF
+
+Printing is a first-class output (`src/styles/print.css`): the "Print or save as
+PDF" button opens the browser dialog. Rules for anything that renders in a chapter:
+
+- Site chrome and interactive-only elements get `print-hide`; print-only details
+  (chapter kicker, canonical URL) get `print-only`.
+- Print forces light tokens, `pt` typography (body 10 pt, line-height 1.42), no
+  background fills (rules and borders instead), and page numbers plus a running
+  header via `@page` margin boxes.
+- Figures print at ≈ 0.17 mm per diagram pixel, capped to the page width and a
+  single page's height, light variant only. Tables and code never scroll in print:
+  tables repeat their header row; code wraps.
+- Every component must stay legible in print: check `/chapters/_kitchen-sink`
+  with the print preview after any design change.
+
 ## Things we don't do
 
 Popups, cookie walls beyond legal need, autoplay, infinite scroll, parallax,

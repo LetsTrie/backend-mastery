@@ -1,0 +1,332 @@
+/*
+ * Print and "Save as PDF": a book page, not a screenshot of a website.
+ * Goals: dense but readable (≈ 10 pt serif), no ink-wasting backgrounds, every figure on one
+ * page at a consistent scale, tables and code that break cleanly, page numbers and a running
+ * header. Page size follows the print dialog (A4 or Letter).
+ */
+
+@layer components {
+  .print-only {
+    display: none;
+  }
+}
+
+@media print {
+  @page {
+    size: auto;
+    margin: 16mm 17mm 17mm;
+
+    @bottom-center {
+      content: counter(page);
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 8pt;
+      color: #555;
+    }
+    @top-left {
+      /* Content is set per chapter (chapter title) in the chapter page. */
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 7.5pt;
+      color: #666;
+    }
+  }
+  @page :first {
+    @top-left {
+      content: none;
+    }
+  }
+
+  /* Light, ink-friendly tokens regardless of the screen theme. */
+  :root {
+    color-scheme: light;
+    --color-bg: #fff !important;
+    --color-surface: #fff !important;
+    --color-surface-strong: #f3f3f3 !important;
+    --color-text: #111 !important;
+    --color-muted: #444 !important;
+    --color-border: #bbb !important;
+    --color-accent: #111 !important;
+    --color-code-bg: #fff !important;
+    --color-note: #333 !important;
+    --color-tip: #333 !important;
+    --color-warning: #333 !important;
+    --color-danger: #333 !important;
+
+    --text-xs: 7.5pt !important;
+    --text-sm: 8.5pt !important;
+    --text-base: 10pt !important;
+    --text-lg: 11.5pt !important;
+    --text-xl: 13.5pt !important;
+    --text-2xl: 17pt !important;
+    --text-3xl: 22pt !important;
+    --leading-body: 1.42 !important;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    print-color-adjust: economy;
+  }
+  body {
+    display: block;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  /* Site chrome and interactive-only elements. */
+  body > header,
+  body > footer,
+  .skip-link,
+  .toc-rail,
+  .print-hide,
+  .copy-button,
+  .heading-anchor,
+  .term-tip,
+  .tabs-list,
+  nextjs-portal {
+    display: none !important;
+  }
+  .print-only {
+    display: revert !important;
+  }
+
+  /* Single column, full printable width. */
+  main {
+    display: block;
+  }
+  .chapter-layout,
+  .reading-grid {
+    display: block !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* ── Chapter opener ─────────────────────────────────────────────── */
+  article > header {
+    margin-bottom: 5mm;
+    padding-bottom: 3.5mm;
+    border-bottom: 0.8pt solid #111;
+  }
+  .chapter-kicker {
+    font-family: var(--font-ui);
+    font-size: 7.5pt;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #444;
+  }
+  article > header h1 {
+    margin-top: 2mm !important;
+    font-size: var(--text-3xl) !important;
+    line-height: 1.1 !important;
+  }
+  article > header h1 + p {
+    margin-top: 1.5mm !important;
+    font-size: 12pt !important;
+    font-style: italic;
+  }
+  article > header > div {
+    margin-top: 2.5mm !important;
+    font-size: 8pt !important;
+    gap: 0 3mm !important;
+  }
+
+  /* ── Rhythm: tighter than screen, still book-like ───────────────── */
+  .prose > * + * {
+    margin-top: 0.62em;
+  }
+  .prose p {
+    orphans: 3;
+    widows: 3;
+  }
+  .prose h2 {
+    margin-top: 1.4em;
+    padding-top: 0;
+    border-top: none;
+  }
+  .prose h3 {
+    margin-top: 1.1em;
+  }
+  .prose h4 {
+    margin-top: 0.9em;
+  }
+  .prose :is(h2, h3, h4) {
+    break-after: avoid;
+    break-inside: avoid;
+  }
+  .prose :is(h2, h3, h4) + * {
+    margin-top: 0.35em;
+  }
+  .prose li + li {
+    margin-top: 0.15em;
+  }
+
+  /* Links: no color, no underline; URLs shown only where a reader needs them. */
+  .prose a,
+  .prose a:visited {
+    color: inherit !important;
+    text-decoration: none !important;
+  }
+  .references a[href^="http"]::after {
+    content: " " attr(href);
+    font-family: var(--font-mono);
+    font-size: 6.5pt;
+    color: #555;
+    word-break: break-all;
+  }
+  .term a {
+    text-decoration: none;
+  }
+  .cite a {
+    color: #333 !important;
+  }
+
+  /* ── Figures: one page each, consistent scale (≈ 0.17 mm per diagram pixel) ── */
+  .figure {
+    margin-block: 1em;
+    break-inside: avoid;
+  }
+  .figure-media {
+    padding: 0;
+    border: none;
+    background: none;
+  }
+  .figure-img--dark {
+    display: none !important;
+  }
+  .figure-img--light {
+    display: block !important;
+  }
+  .figure-img img {
+    width: min(calc(var(--fig-w, 900) * 0.17mm), 100%, calc(232mm * var(--fig-w, 900) / var(--fig-h, 600)));
+    max-width: 100%;
+    height: auto;
+    margin-inline: auto;
+    cursor: default;
+  }
+  .figure figcaption {
+    max-width: none;
+    margin-top: 1.5mm;
+    font-size: 8pt;
+    line-height: 1.35;
+  }
+
+  /* ── Boxes: rules instead of fills ──────────────────────────────── */
+  .key-takeaways {
+    padding: 2.5mm 4mm;
+    border: 0.6pt solid #888;
+    background: none;
+    break-inside: avoid;
+  }
+  .callout {
+    padding: 0.5mm 0 0.5mm 3.5mm;
+    border-inline-start: 1.5pt solid #555;
+    border-radius: 0;
+    background: none !important;
+    break-inside: avoid;
+  }
+  .callout-title {
+    color: #111;
+  }
+  .margin-note-anchor {
+    position: static !important;
+    height: auto !important;
+  }
+  .margin-note {
+    position: static !important;
+    width: auto !important;
+    break-inside: avoid;
+  }
+
+  /* ── Tables: no scroll containers; header row repeats on each page ── */
+  .table-scroll {
+    overflow: visible;
+    border: none;
+    border-radius: 0;
+  }
+  .prose table {
+    font-size: 8pt;
+    line-height: 1.3;
+  }
+  .prose :is(th, td) {
+    padding: 1mm 1.5mm;
+    border-bottom: 0.4pt solid #bbb;
+  }
+  .prose th {
+    background: none;
+    border-bottom: 0.9pt solid #111;
+    white-space: normal;
+  }
+  .prose thead {
+    display: table-header-group;
+  }
+  .prose tr {
+    break-inside: avoid;
+  }
+  .estimate,
+  .tradeoffs {
+    break-inside: avoid;
+  }
+  .estimate-title,
+  .tradeoffs-title {
+    color: #333;
+  }
+
+  /* ── Code: wrap instead of scroll; light syntax colors ──────────── */
+  .code-block pre {
+    overflow: visible;
+    padding: 1.5mm 0;
+    border: 0.5pt solid #bbb;
+    border-radius: 0;
+    font-size: 7.5pt;
+    line-height: 1.35;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .code-block pre code {
+    display: block !important;
+    min-width: 0 !important;
+  }
+  .code-block [data-line] {
+    padding-inline: 2.5mm;
+  }
+  .code-block code span {
+    color: var(--shiki-light) !important;
+  }
+  [data-rehype-pretty-code-figure] {
+    break-inside: avoid;
+  }
+  [data-rehype-pretty-code-title] {
+    padding: 0.8mm 2.5mm;
+    border-radius: 0;
+    background: none;
+    font-size: 7pt;
+  }
+  .prose :not(pre) > code {
+    padding: 0 0.2em;
+    border: none;
+    background: none;
+    font-size: 0.88em;
+  }
+
+  /* Tabs print every panel under its label. */
+  .tabs-panel[hidden] {
+    display: block !important;
+  }
+  [role="tabpanel"]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 1mm;
+    font-family: var(--font-ui);
+    font-size: 8pt;
+    font-weight: 650;
+  }
+
+  /* Steps markers: lighter ink. */
+  .steps li::before {
+    border-width: 0.8pt;
+  }
+
+  .how-to-cite {
+    break-inside: avoid;
+  }
+}

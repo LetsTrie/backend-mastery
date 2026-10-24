@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { ResolvedFigure } from "@/lib/content";
 import { InlineText } from "./inline-text";
 
@@ -9,9 +10,11 @@ export function Figure({ figure }: { figure: ResolvedFigure | undefined }) {
   if (!figure) return <div className="figure-missing">Unknown figure</div>;
   const anchor = `fig-${figure.id}`;
   const size = figure.size ?? undefined;
+  // Intrinsic size, used by the print stylesheet to scale every diagram consistently.
+  const printSize = size ? ({ "--fig-w": size.width, "--fig-h": size.height } as CSSProperties) : undefined;
 
   return (
-    <figure id={anchor} className="figure" data-width={figure.width}>
+    <figure id={anchor} className="figure" data-width={figure.width} style={printSize}>
       <div className="figure-media">
         {figure.exists ? (
           <>

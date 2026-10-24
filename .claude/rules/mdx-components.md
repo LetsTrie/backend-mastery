@@ -22,6 +22,10 @@ only these components plus standard Markdown. Components live in
   Components; progressive enhancement for anything interactive).
 - Every component must degrade into readable text if the content is exported
   to plain Markdown (keep children as real text, not props-only).
+- Every component needs a **Markdown export mapping** in
+  `src/lib/content/markdown.ts` and an entry in `src/lib/content/catalog.ts`.
+  The unit tests fail if a catalog component has no mapping. This export powers
+  "Copy as Markdown", `/chapters/<slug>.md`, and `/llms-full.txt`.
 
 ---
 

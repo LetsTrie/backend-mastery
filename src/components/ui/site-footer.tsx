@@ -15,6 +15,9 @@ export function SiteFooter() {
           <Link href="/atom.xml" className="hover:text-text">
             Atom
           </Link>
+          <a href="/llms.txt" className="hover:text-text">
+            llms.txt
+          </a>
           {site.repoUrl ? (
             <a href={site.repoUrl} className="hover:text-text">
               Source

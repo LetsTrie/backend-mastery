@@ -3,8 +3,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getMdxComponents } from "@/components/mdx";
+import { ChapterActions } from "@/components/ui/chapter-actions";
 import { StatusBadge } from "@/components/ui/chapter-list";
+import { HowToCite } from "@/components/ui/how-to-cite";
 import { TocInline, TocRail } from "@/components/ui/toc";
+import { chapterCitation } from "@/lib/cite";
 import {
   getAuthors,
   getChapter,
@@ -15,6 +18,7 @@ import {
   getUsedIn,
   type Chapter,
 } from "@/lib/content";
+import { markdownPath } from "@/lib/llm";
 import { absoluteUrl, formatDate, site } from "@/lib/site";
 
 export const dynamicParams = false;
@@ -29,10 +33,23 @@ export async function generateMetadata({
   const chapter = getChapter((await params).slug);
   if (!chapter) return {};
   const url = `/chapters/${chapter.slug}`;
+  const cite = chapterCitation(chapter);
   return {
     title: chapter.title,
     description: chapter.description,
-    alternates: { canonical: url },
+    alternates: {
+      canonical: url,
+      types: { "text/markdown": markdownPath(chapter.slug) },
+    },
+    // Highwire Press tags: read by Google Scholar, Zotero, and other citation tools.
+    other: {
+      citation_title: chapter.title,
+      citation_author: cite.authors.split(", "),
+      citation_publication_date: (chapter.published ?? chapter.updated).replaceAll("-", "/"),
+      citation_journal_title: site.name,
+      citation_public_url: cite.url,
+      citation_language: "en",
+    },
     robots: chapter.status === "published" ? undefined : { index: false },
     openGraph: {
       type: "article",
@@ -58,7 +75,18 @@ function articleJsonLd(chapter: Chapter) {
     datePublished: chapter.published,
     dateModified: chapter.updated,
     keywords: chapter.tags.join(", "),
-    author: getAuthors(chapter.authors).map((a) => ({ "@type": "Person", name: a.name, url: a.url })),
+    inLanguage: "en",
+    isAccessibleForFree: true,
+    ...(site.license ? { license: site.license.url } : {}),
+    encoding: {
+      "@type": "MediaObject",
+      encodingFormat: "text/markdown",
+      contentUrl: absoluteUrl(markdownPath(chapter.slug)),
+    },
+    author:
+      chapter.authors.length > 0
+        ? getAuthors(chapter.authors).map((a) => ({ "@type": "Person", name: a.name, url: a.url }))
+        : { "@type": "Organization", name: site.name, url: site.url },
     publisher: { "@type": "Organization", name: site.name, url: site.url },
   };
 }
@@ -83,9 +111,12 @@ export default async function ChapterPage({ params }: PageProps<"/chapters/[slug
   const { previous, next } = getNeighbors(chapter.slug);
   const usedIn = getUsedIn(chapter.slug);
   const hasReferences = chapter.citations.length > 0 || chapter.references.length > 0;
-  const toc = hasReferences
-    ? [...chapter.toc, { depth: 2 as const, id: "references", text: "References" }]
-    : chapter.toc;
+  const toc = [
+    ...chapter.toc,
+    ...(hasReferences ? [{ depth: 2 as const, id: "references", text: "References" }] : []),
+    { depth: 2 as const, id: "how-to-cite", text: "How to cite" },
+  ];
+  const canonical = absoluteUrl(`/chapters/${chapter.slug}`);
 
   return (
     <div className="chapter-layout">
@@ -94,6 +125,10 @@ export default async function ChapterPage({ params }: PageProps<"/chapters/[slug
       </aside>
 
       <article className="reading-grid prose pt-10 sm:pt-16">
+        {/* Running header for printed pages (see src/styles/print.css). */}
+        <style>{`@media print { @page { @top-left { content: ${JSON.stringify(
+          `${site.name} · ${chapter.title}`,
+        )}; } } @page :first { @top-left { content: none; } } }`}</style>
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
@@ -102,7 +137,12 @@ export default async function ChapterPage({ params }: PageProps<"/chapters/[slug
         />
 
         <header className="font-ui">
-          <nav aria-label="Breadcrumb" className="text-sm text-muted">
+          <p className="print-only chapter-kicker">
+            {site.name}
+            {part ? ` · ${part.title}` : null}
+            {number ? ` · Chapter ${number}` : null}
+          </p>
+          <nav aria-label="Breadcrumb" className="print-hide text-sm text-muted">
             <Link href="/chapters" className="hover:text-text">
               Chapters
             </Link>
@@ -130,29 +170,37 @@ export default async function ChapterPage({ params }: PageProps<"/chapters/[slug
                 Updated <time dateTime={chapter.updated}>{formatDate(chapter.updated)}</time>
               </span>
             ) : null}
-            <span>{chapter.readingMinutes} min read</span>
-            <StatusBadge status={chapter.status} />
+            <span className="print-hide">{chapter.readingMinutes} min read</span>
+            <span className="print-hide">
+              <StatusBadge status={chapter.status} />
+            </span>
             {chapter.tags.map((tag) => (
-              <Link key={tag} href={`/tags/${tag}`} className="badge hover:text-text">
+              <Link key={tag} href={`/tags/${tag}`} className="badge print-hide hover:text-text">
                 {tag}
               </Link>
             ))}
+            <span className="print-only">{canonical}</span>
           </div>
+          <ChapterActions markdownHref={markdownPath(chapter.slug)} />
           {chapter.status === "archived" ? (
-            <p className="callout mt-6" data-type="warning" role="note">
+            <p className="callout print-hide mt-6" data-type="warning" role="note">
               This chapter is archived. It stays online so existing links keep working, but it is no
               longer maintained.
             </p>
           ) : null}
           {chapter.status === "draft" || chapter.status === "review" ? (
-            <p className="callout mt-6" data-type="warning" role="note">
+            <p className="callout print-hide mt-6" data-type="warning" role="note">
               {chapter.isFixture ? "Design fixture — never published." : `Unpublished ${chapter.status}.`}{" "}
               {chapter.openTodos > 0 ? `${chapter.openTodos} open TODO(verify).` : null}
             </p>
           ) : null}
         </header>
 
-        {toc.length > 0 ? <TocInline items={toc} /> : null}
+        {toc.length > 0 ? (
+          <div className="print-hide">
+            <TocInline items={toc} />
+          </div>
+        ) : null}
 
         <MDXContent code={chapter.body} components={getMdxComponents(chapter)} />
 
@@ -184,7 +232,7 @@ export default async function ChapterPage({ params }: PageProps<"/chapters/[slug
         ) : null}
 
         {hasReferences ? (
-          <section aria-labelledby="references">
+          <section aria-labelledby="references" className="references">
             <h2 id="references">References</h2>
             {chapter.citations.length > 0 ? (
               <ol className="text-[0.95em]">
@@ -230,8 +278,10 @@ export default async function ChapterPage({ params }: PageProps<"/chapters/[slug
           </section>
         ) : null}
 
+        <HowToCite chapter={chapter} markdownHref={markdownPath(chapter.slug)} />
+
         {site.repoUrl ? (
-          <p className="font-ui text-sm text-muted">
+          <p className="print-hide font-ui text-sm text-muted">
             <a
               href={`${site.repoUrl}/edit/main/content/chapters/${chapter.folder}/index.mdx`}
               className="link"
@@ -251,7 +301,7 @@ export default async function ChapterPage({ params }: PageProps<"/chapters/[slug
         {previous || next ? (
           <nav
             aria-label="Chapter navigation"
-            className="bleed-wide mt-16 grid gap-4 border-t border-border pt-8 font-ui sm:grid-cols-2"
+            className="print-hide bleed-wide mt-16 grid gap-4 border-t border-border pt-8 font-ui sm:grid-cols-2"
           >
             {previous ? (
               <Link href={`/chapters/${previous.slug}`} className="group">

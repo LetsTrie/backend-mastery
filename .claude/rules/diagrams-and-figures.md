@@ -95,6 +95,10 @@ paths are also dashed-red *and* labeled.
   (`wide`), so keep the SVG's native width ≲ 1,100 px: prefer `direction: down`
   for overviews and nest `direction: right` inside `boundary` groups.
   `pnpm build` output is not the place to discover this — preview the PNG.
+- **Print proportions.** A printed figure must fit one page, so its height is capped
+  near 230 mm. A diagram taller than about 1.5× its width shrinks to fit and its
+  labels become hard to read on paper (below ~6 pt). Prefer wider, shorter layouts
+  (`grid-columns`, side-by-side `boundary` groups), or split one tall figure into two.
 - No paragraphs inside diagrams.
 - Readers can click any figure to open the full-size SVG.
 

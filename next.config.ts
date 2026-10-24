@@ -17,6 +17,14 @@ const nextConfig: NextConfig = {
   async redirects() {
     return getAliasRedirects();
   },
+  async rewrites() {
+    return {
+      // /chapters/<slug>.md → the chapter as portable Markdown (src/lib/llm.ts).
+      beforeFiles: [
+        { source: "/chapters/:slug([a-z0-9_-]+)\\.md", destination: "/chapters/:slug/index.md" },
+      ],
+    };
+  },
 };
 
 // withContentCollections must stay the outermost plugin.

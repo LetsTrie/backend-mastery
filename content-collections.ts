@@ -27,6 +27,8 @@ const chapters = defineCollection({
     return {
       ...frontmatter,
       folder,
+      // Raw MDX body, kept for the portable Markdown export (src/lib/llm.ts). Server-only.
+      mdx: content,
       isFixture: folder.startsWith("_"),
       body,
       toc: analysis.toc,

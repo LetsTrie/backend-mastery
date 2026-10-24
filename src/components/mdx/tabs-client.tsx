@@ -56,6 +56,7 @@ export function TabsClient({ tabs }: { tabs: { label: string; content: ReactNode
           id={`${baseId}-panel-${index}`}
           role="tabpanel"
           className="tabs-panel"
+          data-label={tab.label}
           aria-labelledby={`${baseId}-tab-${index}`}
           hidden={index !== active}
         >

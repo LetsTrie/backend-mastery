@@ -36,6 +36,8 @@ paths:
 | `/tags/[tag]`                 | Chapters by tag                                 |
 | `/glossary`                   | All terms, with `#term-id` anchors              |
 | `/feed.xml`, `/atom.xml`      | Full-content RSS / Atom                         |
+| `/chapters/[slug].md`         | The chapter as portable Markdown (rewrite to `/chapters/[slug]/index.md`) |
+| `/llms.txt`, `/llms-full.txt` | LLM index and all chapters as Markdown ([llmstxt.org](https://llmstxt.org)) |
 | `/sitemap.xml`, `/robots.txt` | Generated                                       |
 | `/chapters/[slug]/opengraph-image` | Generated social card                      |
 

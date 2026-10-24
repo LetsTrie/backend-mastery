@@ -89,6 +89,7 @@
   /* Layout */
   --width-page: 84rem;
   --measure: 76ch;
+  --measure-wide: 92ch; /* chapter text beside the sidebar, ≥ 1280 px */
   --breakout: 4.5rem;
   --header-height: 4rem;
 }

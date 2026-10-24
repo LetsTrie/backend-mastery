@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-/** Tangential note: in the right margin on wide screens, inline otherwise. Never essential. */
+/** Tangential note, rendered inline as a tinted box. Never essential. */
 export function Aside({ children }: { children: ReactNode }) {
   return (
     <div className="margin-note-anchor">

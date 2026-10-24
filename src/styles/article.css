@@ -21,13 +21,14 @@
       grid-template-columns: 15rem minmax(0, 1fr);
       padding-inline: clamp(1rem, 4vw, 2rem);
     }
-    /* Next to the sidebar, the text sits close on the left; spare room goes right, to margin notes. */
+    /* Next to the sidebar the text fills the column up to --measure-wide; only what is left
+       over goes to the right edge. Wide figures break out by a slim gutter on each side. */
     .chapter-layout .reading-grid {
       grid-template-columns:
         [full-start] minmax(1rem, 2.5rem)
-        [wide-start] minmax(0, var(--breakout))
-        [text-start] min(var(--measure), 100% - 2rem)
-        [text-end] minmax(0, var(--breakout))
+        [wide-start] minmax(0, 2rem)
+        [text-start] minmax(0, var(--measure-wide))
+        [text-end] minmax(0, 2rem)
         [wide-end] minmax(1rem, 1fr)
         [full-end];
     }
@@ -107,32 +108,12 @@
     margin-top: 0.85rem;
     font-size: var(--text-3xl);
   }
+  /* Print-only byline (author · date · URL); see print.css. */
   .chapter-meta {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.5rem 1.1rem;
-    margin-top: 1.5rem;
-    padding-block: 0.75rem;
-    border-block: 1px solid var(--color-border);
+    margin-top: 1.25rem;
     font-family: var(--font-ui);
     font-size: var(--text-sm);
     color: var(--color-muted);
-  }
-  .chapter-meta > span:not(.print-only) {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.45rem;
-  }
-  .chapter-meta svg {
-    color: var(--color-subtle);
-  }
-  .chapter-author {
-    font-weight: 600;
-    color: var(--color-text);
-  }
-  .chapter-author a:hover {
-    color: var(--color-accent);
   }
   .notice {
     display: flex;
@@ -890,24 +871,6 @@
     text-transform: uppercase;
     color: var(--color-subtle);
   }
-  /* Grid items can't float, so on wide screens the note hangs off a zero-height anchor. */
-  @media (min-width: 88rem) {
-    .margin-note-anchor {
-      position: relative;
-      height: 0;
-    }
-    .margin-note {
-      position: absolute;
-      top: 0;
-      inset-inline-start: calc(100% + 1rem);
-      width: 9.5rem;
-      padding: 0 0 0 1rem;
-      border-radius: 0;
-      background: none;
-      border-inline-start: 1px solid var(--color-border-strong);
-    }
-  }
-
   /* ── Tabs (progressively enhanced), styled as a segmented control ── */
   .tabs-list {
     display: inline-flex;

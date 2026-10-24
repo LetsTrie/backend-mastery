@@ -3,11 +3,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getMdxComponents } from "@/components/mdx";
-import { StatusBadge } from "@/components/ui/chapter-list";
 import { HowToCite } from "@/components/ui/how-to-cite";
 import { Icon } from "@/components/ui/icons";
 import { PrintPrep } from "@/components/ui/print-prep";
-import { TocInline, TocRail } from "@/components/ui/toc";
+import { TocRail } from "@/components/ui/toc";
 import { chapterCitation } from "@/lib/cite";
 import {
   getAuthors,
@@ -159,31 +158,19 @@ export default async function ChapterPage({ params }: PageProps<"/chapters/[slug
           <h1 className="display chapter-title">{chapter.title}</h1>
           <p className="lede mt-5 text-xl">{chapter.subtitle}</p>
 
-          <div className="chapter-meta">
-            {authors.map((author) => (
-              <span key={author.key} className="chapter-author">
-                <Icon name="user" size={16} />
-                {author.url ? <a href={author.url}>{author.name}</a> : author.name}
-              </span>
-            ))}
-            {chapter.published ? (
-              <span>
-                <Icon name="calendar" size={16} />
-                <time dateTime={chapter.published}>{formatDate(chapter.published)}</time>
-              </span>
-            ) : null}
-            <span className="print-hide">
-              <Icon name="clock" size={16} />
-              {chapter.readingMinutes} min read
-            </span>
-            <span className="print-hide">
-              <StatusBadge status={chapter.status} />
-            </span>
-            <span className="print-only">{canonical}</span>
-          </div>
+          {/* No byline strip on screen; a printed copy still says who, when, and where. */}
+          <p className="print-only chapter-meta">
+            {[
+              authors.map((author) => author.name).join(", "),
+              chapter.published ? formatDate(chapter.published) : null,
+              canonical,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
 
           {chapter.tags.length > 0 ? (
-            <div className="mt-4 flex flex-wrap gap-2 print-hide">
+            <div className="mt-6 flex flex-wrap gap-2 print-hide">
               {chapter.tags.map((tag) => (
                 <Link key={tag} href={`/tags/${tag}`} className="chip">
                   #{tag}
@@ -212,12 +199,6 @@ export default async function ChapterPage({ params }: PageProps<"/chapters/[slug
             </p>
           ) : null}
         </header>
-
-        {toc.length > 0 ? (
-          <div className="print-hide">
-            <TocInline items={toc} />
-          </div>
-        ) : null}
 
         <MDXContent code={chapter.body} components={getMdxComponents(chapter)} />
 

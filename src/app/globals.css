@@ -374,6 +374,61 @@
     }
   }
 
+  /* ── Back to top (floating) ───────────────────────────────────────── */
+  .back-to-top {
+    position: fixed;
+    inset: auto max(1rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) auto;
+    z-index: 30;
+    display: grid;
+    place-items: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-full);
+    background: color-mix(in oklch, var(--color-bg) 88%, transparent);
+    backdrop-filter: blur(8px);
+    color: var(--color-muted);
+    box-shadow: var(--shadow-md);
+    transition:
+      color var(--duration-fast) var(--ease-out),
+      border-color var(--duration-fast) var(--ease-out),
+      box-shadow var(--duration-fast) var(--ease-out);
+  }
+  .back-to-top:hover {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+    box-shadow: var(--shadow-lg);
+  }
+  @media (min-width: 48rem) {
+    .back-to-top {
+      inset-inline-end: 1.5rem;
+      inset-block-end: 1.5rem;
+    }
+  }
+  /* Hidden near the top; fades in over the second half of the first screen scrolled.
+     A page too short to scroll has an inactive timeline, so the control stays hidden. */
+  @supports (animation-timeline: scroll()) {
+    .back-to-top {
+      opacity: 0;
+      visibility: hidden;
+      animation: back-to-top-in linear both;
+      animation-timeline: scroll(root block);
+      animation-range: 50vh 100vh;
+    }
+  }
+  @keyframes back-to-top-in {
+    from {
+      opacity: 0;
+      visibility: hidden;
+      translate: 0 0.5rem;
+    }
+    to {
+      opacity: 1;
+      visibility: visible;
+      translate: 0 0;
+    }
+  }
+
   /* ── Site footer ───────────────────────────────────────────────────── */
   .site-footer {
     margin-top: 8rem;

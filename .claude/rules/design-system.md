@@ -86,7 +86,13 @@ never rename a token without updating print.
 `.btn` + `.btn-primary` / `.btn-secondary`, `.icon-button`, `.chip`/`.badge`,
 `.status`, `.eyebrow`, `.display`, `.lede`, `.card` (+ `.card-link`, `.card-cover`
 for whole-card links), `.section-label`, `.chapter-row`, `.nav-link`,
-`.reading-progress`. Reuse these before writing new styles.
+`.reading-progress`, `.back-to-top`. Reuse these before writing new styles.
+
+The floating **back-to-top** button (every page, bottom-right) is a plain link to
+`#main`, no JavaScript. It fades in over the first screen of scrolling via a
+scroll-driven animation, stays hidden on pages too short to scroll, and is
+always visible in browsers without scroll-driven animations. It is the only
+floating control; don't add others.
 
 ## Chapter page anatomy
 

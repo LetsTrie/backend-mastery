@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { BackToTop } from "@/components/ui/back-to-top";
 import { SiteFooter } from "@/components/ui/site-footer";
 import { SiteHeader } from "@/components/ui/site-header";
 import { themeScript } from "@/components/ui/theme-toggle";
@@ -45,6 +46,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           {children}
         </main>
         <SiteFooter />
+        <BackToTop />
       </body>
     </html>
   );

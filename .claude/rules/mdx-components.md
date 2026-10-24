@@ -32,6 +32,8 @@ only these components plus standard Markdown. Components live in
 ## Catalog
 
 ### `<KeyTakeaways>`
+*Kept so older content keeps rendering; not used in chapters.* Chapters open
+with prose, not a summary box.
 Opening summary box. 3–5 bullets, each a full sentence.
 ```mdx
 <KeyTakeaways>
@@ -66,10 +68,13 @@ As <FigRef id="high-level-design" /> shows, …
 <Callout type="tip" title="Optional title">Body in Markdown.</Callout>
 ```
 `type`: `note` | `tip` | `warning` | `pitfall` | `interview`.
-`interview` = "how this comes up in a design interview". Max ~1 callout per 800 words.
+`interview` is kept for compatibility but not used: chapters don't carry
+interview-coaching asides. Max ~1 callout per 800 words.
 
 ### `<Estimate>`
-Back-of-the-envelope tables. Shows assumption, formula, result.
+Optional. Estimates are written inline (assumption → calculation → result; see
+`chapter-blueprint.md`). Use `<Estimate>` only for a short summary table at the
+end of the estimation section, never as the only place a calculation appears.
 ```mdx
 <Estimate title="Traffic">
 | Quantity          | Formula                     | Result        |
@@ -96,7 +101,10 @@ Glossary link with hover/focus definition from `content/glossary.yml`.
 ```mdx
 <Term id="idempotency-key">idempotency key</Term>
 ```
-Use on the **first** occurrence per chapter only.
+Use on the **first** occurrence per chapter only. Use it generously: every
+acronym, protocol, or technique a mid-level engineer might not know cold
+(APNs, TTL, Little's law, AIMD, RPO…) gets a glossary entry and a `<Term>`.
+Add the entry to `content/glossary.yml` first; a missing id fails content lint.
 
 ### `<Cite>`
 Inline citation; collected into the References section automatically.

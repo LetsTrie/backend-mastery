@@ -65,3 +65,55 @@ ttl:
   term: Time-to-live (TTL)
   definition: How long a piece of data remains valid before it expires and must be refreshed or discarded.
   owner: caching
+
+aimd:
+  term: Additive increase, multiplicative decrease (AIMD)
+  definition: A rate-control rule that cuts the sending rate sharply (for example, in half) when it sees congestion or throttling, then raises it again in small steps; TCP uses it to find a network's real capacity.
+
+apns:
+  term: Apple Push Notification service (APNs)
+  definition: Apple's service for delivering push notifications to iPhones, iPads, and Macs. It is the only way to reach an Apple device's notification center.
+
+dau:
+  term: Daily active users (DAU)
+  definition: The number of distinct users who use a product on a given day; the usual starting point for sizing a system.
+
+fcm:
+  term: Firebase Cloud Messaging (FCM)
+  definition: Google's service for delivering push notifications and data messages to Android devices, and also to iOS and web apps through their own channels.
+
+jitter:
+  term: Jitter
+  definition: Randomness added to a delay so that many clients waiting the same amount of time do not all act at the same instant.
+
+lease:
+  term: Lease
+  definition: A claim on a piece of work that expires on its own after a set time, so if the holder crashes, someone else can safely take the work over.
+
+littles-law:
+  term: Little's law
+  definition: Requests in flight equal the arrival rate times the time each request takes. At 1,000 requests per second taking 0.1 s each, about 100 are in flight at any moment.
+
+partition:
+  term: Partition
+  definition: A slice of a table or topic chosen by a key, such as a user id. All data with the same key lands in the same partition, which lives on one node and keeps its own order.
+
+rpo:
+  term: Recovery point objective (RPO)
+  definition: How much recent data you can afford to lose in a disaster, measured as time; an RPO of a few seconds means the last few seconds of writes may be gone.
+
+rto:
+  term: Recovery time objective (RTO)
+  definition: How long a system may take to come back after a disaster before the outage becomes unacceptable.
+
+sms-segment:
+  term: SMS segment
+  definition: The unit carriers bill and rate-limit SMS by. One segment holds 160 plain-alphabet characters or 70 characters when the text needs emoji or non-Latin scripts; longer messages are split into several segments.
+
+token-bucket:
+  term: Token bucket
+  definition: A rate limiter that adds tokens to a bucket at a steady rate and spends one per request; requests wait or are rejected when the bucket is empty, while short bursts can use saved-up tokens.
+
+wide-column-store:
+  term: Wide-column store
+  definition: A distributed database, such as Cassandra or Bigtable, that groups rows into partitions by key and sorts them within each partition. It is built for very high write volume and fast reads of one partition's newest rows.

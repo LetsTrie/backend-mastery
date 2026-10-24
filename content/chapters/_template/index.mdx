@@ -25,12 +25,6 @@ revisions: []
   Delete these guidance comments as you fill each section.
 */}
 
-<KeyTakeaways>
-- First conclusion the reader should walk away with, as a full sentence.
-- Second conclusion.
-- Third conclusion.
-</KeyTakeaways>
-
 {/* Intro: 1–3 paragraphs. What are we building, who uses it, why is it hard? */}
 
 Intro paragraph.
@@ -61,24 +55,35 @@ Intro paragraph.
 
 ## Back-of-the-envelope estimation
 
-**Assumptions:**
-- … DAU
-- … per user per day
-- Peak factor ×…
+{/* Each assumption is followed immediately by the calculation that uses it and a
+    bold result. Units spelled out ("bytes", not "B"). Explain any number a reader
+    can't derive at a glance. */}
 
-<Estimate title="Traffic">
-| Quantity    | Formula | Result |
-| ----------- | ------- | ------ |
-| Daily …     | …       | …      |
-| Average QPS | …       | …      |
-| Peak QPS    | …       | …      |
-</Estimate>
+### Traffic
 
-<Estimate title="Storage">
-| Quantity    | Formula | Result |
-| ----------- | ------- | ------ |
-| Per record  | …       | …      |
-| Per year    | …       | …      |
+**Assume … DAU, … per user per day.**
+
+- … × … = **… per day**
+- … ÷ 86,400 s ≈ **… per second** on average
+
+**Assume peaks run ×… the average.**
+
+- … × … ≈ **… per second** at peak
+
+### Storage
+
+**Assume each record is about … bytes and is kept for ….**
+
+- … × … bytes ≈ **… GB per day**
+- … GB × 365 ≈ **… TB per year**
+
+### At a glance
+
+<Estimate title="Summary">
+| Quantity      | Result |
+| ------------- | ------ |
+| Peak traffic  | …      |
+| Storage/year  | …      |
 </Estimate>
 
 ## API design

@@ -2,12 +2,12 @@
 slug: design-a-notification-service
 kind: case-study
 title: Design a notification service
-subtitle: Fan-out, retries, and user preferences at a billion messages a day
+subtitle: "How to deliver a billion push, email, and SMS notifications a day: reliably, on time, and within budget"
 description: >-
   Design a notification service that sends push, email, and SMS at a billion
   messages a day: estimates, APIs, fan-out, retries, deduplication, and failure modes.
 part: case-studies
-tags: [messaging, queues, fan-out, push-notifications, reliability]
+tags: [system-design, distributed-systems, push-notifications, messaging, queues, fan-out, idempotency, reliability, scalability, interview-prep]
 prerequisites: [message-queues, idempotency, rate-limiting-algorithms]
 status: published
 authors: [md-sakib-khan]
@@ -29,16 +29,10 @@ references:
     url: https://www.enterpriseintegrationpatterns.com/
 revisions:
   - date: 2026-10-24
+    note: Estimates rewritten with each calculation beside its assumption; key takeaways and interview callouts removed.
+  - date: 2026-10-24
     note: First published.
 ---
-
-<KeyTakeaways>
-- Accept fast, deliver later: the API's only job is to durably record the request and return `202 Accepted`; everything slow happens behind a queue.
-- Delivery is at-least-once all the way down, so every layer recognizes duplicates: the API's idempotency key, the processor's id check, the worker's send log, and the device's collapse id. What cannot be deduplicated is recorded as `indeterminate`, not hidden.
-- Priority starts at the front door, because a one-time password must never wait behind a 50-million-user marketing campaign.
-- The hardest part is not sending; it is deciding not to send: preferences, quiet hours, frequency caps, and digests protect the person on the other end, and an opt-out must beat every queue.
-- Third-party providers set your real limits and your real costs. Their quotas, sender registrations, token lifecycles, outages, and per-message prices shape the design more than your own servers do.
-</KeyTakeaways>
 
 Every product eventually needs to tap someone on the shoulder. Your order shipped. Someone replied to your comment. Here is your login code. It looks like the easiest feature in the backlog: call Apple, call Google, call an email provider, done.
 
@@ -51,7 +45,7 @@ A notification service is where reliability engineering meets human attention. I
 We are building an internal platform. Other teams' services, which we call **producers**, ask it to notify a user about something. The platform decides whether, when, and how to deliver that notification, hands it to the right third-party provider, and tracks what happened.
 
 **In scope:**
-- Channels: iOS push through Apple Push Notification service (APNs), Android push through Firebase Cloud Messaging (FCM), email, SMS, and an in-app inbox.
+- Channels: iOS push through <Term id="apns">Apple Push Notification service (APNs)</Term>, Android push through <Term id="fcm">Firebase Cloud Messaging (FCM)</Term>, email, SMS, and an in-app inbox.
 - Two traffic shapes: **transactional** notifications for one user ("your code is 482913") and **bulk** campaigns to a segment of users ("20% off this weekend").
 - User preferences per category and channel, quiet hours, and time zones.
 - Templates with localization and personalization.
@@ -65,10 +59,6 @@ We are building an internal platform. Other teams' services, which we call **pro
 - The UI that marketers use to author campaigns.
 
 If you are deciding whether to build this at all, read [Evolution](#evolution) first: most teams should buy before they build.
-
-<Callout type="interview" title="Scope it in the first five minutes">
-"Design a notification system" is deliberately vague. Before drawing anything, pin down four things out loud: which channels, transactional versus bulk (or both), the scale in notifications per day, and whether the system decides *what* to send or only *how* to deliver it. Interviewers listen for whether you separate the platform from the products that use it.
-</Callout>
 
 ## Requirements
 
@@ -93,90 +83,124 @@ Notice what is *not* on the list: exactly-once delivery and global ordering. We 
 
 ## Back-of-the-envelope estimation
 
-**Assumptions:**
-- 200M daily active users (DAU), each receiving 5 notifications per day on average.
-- Peak traffic is 5× the average (morning commutes, campaign launches, live events).
-- Each notification is delivered on one channel. Channel mix: push 60%, in-app 25%, email 13%, SMS 2%.
-- A push notification goes to 1.5 devices on average: some users have a phone and a tablet, and some devices have no valid token.
-- Half of push device sends go to Android.
-- 3% of provider calls are retried.
-- A notification record is about 500 B; each channel delivery produces about 4 status events of 100 B.
-- 500M registered users with 2 devices each on average.
-- A provider call takes about 100 ms end to end.
-- Bulk sends get a budget of 40k notifications per second at peak; the rest of the capacity is reserved for transactional lanes.
-- Provider prices, for the cost estimate: about $0.01 per SMS segment all-in, $0.10 per 1,000 emails, and no per-message fee for push.
+We size the system in five steps: traffic, the provider calls that traffic turns into, storage, concurrency, and cost. Each assumption sits right next to the calculation that uses it. The numbers are deliberately round; the goal is the right order of magnitude, not false precision.
 
-<Estimate title="Traffic">
-| Quantity                 | Formula                    | Result            |
-| ------------------------ | -------------------------- | ----------------- |
-| Notifications per day    | 200M DAU × 5               | 1B / day          |
-| Average rate             | 1B ÷ 86,400 s              | ≈ 11.6k msg/s     |
-| Peak rate                | 11.6k × 5                  | ≈ 58k msg/s       |
-| Email per day            | 1B × 13%                   | 130M / day        |
-| SMS per day              | 1B × 2%                    | 20M / day         |
-</Estimate>
+### Traffic
 
-Fifty-eight thousand notifications per second is not the number our providers see. A notification fans out to channels, a push to devices, and a provider call to retries, and each layer is a different count:
+Assume 200 million <Term id="dau">daily active users (DAU)</Term>, each receiving 5 notifications a day on average.
 
-<Estimate title="From notifications to provider calls (peak)">
-| Quantity                          | Formula                       | Result            |
-| --------------------------------- | ----------------------------- | ----------------- |
-| Logical notifications             | from above                    | 58k / s           |
-| Push channel deliveries           | 58k × 60%                     | ≈ 34.7k / s       |
-| Push device sends                 | 34.7k × 1.5 devices           | ≈ 52k / s         |
-| Android device sends              | 52k × 50% × 60 s              | ≈ 1.56M / min     |
-| Email sends                       | 58k × 13%                     | ≈ 7.5k / s        |
-| SMS sends                         | 58k × 2%                      | ≈ 1.2k / s        |
-| In-app inbox writes (ours)        | 58k × 25%                     | ≈ 14.5k / s       |
-| Provider calls                    | 52k + 7.5k + 1.2k             | ≈ 61k / s         |
-| Provider attempts, with retries   | 61k × 1.03                    | ≈ 63k / s         |
-</Estimate>
+- Notifications per day: 200M users × 5 = **1 billion**
+- Average rate: 1B ÷ 86,400 seconds in a day ≈ **11.6k per second**
+
+Traffic is never flat. Morning commutes, campaign launches, and live events bunch it up, so assume the peak is five times the average.
+
+- Peak rate: 11.6k × 5 ≈ **58k per second**
+
+Each notification goes out on one channel. Assume 60% are push, 25% in-app, 13% email, and 2% SMS.
+
+- Push: 1B × 60% = **600M per day**
+- In-app: 1B × 25% = **250M per day**
+- Email: 1B × 13% = **130M per day**
+- SMS: 1B × 2% = **20M per day**
+
+### From notifications to provider calls
+
+Fifty-eight thousand notifications per second is not the number our providers see. A push goes to every device the user has, and some provider calls fail and are retried. Assume a push reaches 1.5 devices on average (some users have a phone and a tablet; some devices have no valid token), half of those devices run Android, and 3% of provider calls are retried. At peak:
+
+- Push notifications: 58k × 60% ≈ **34.7k per second**
+- Push device sends: 34.7k × 1.5 devices ≈ **52k per second**
+- Android device sends: 52k × 50% × 60 seconds ≈ **1.56M per minute**
+- Email sends: 58k × 13% ≈ **7.5k per second**
+- SMS sends: 58k × 2% ≈ **1.2k per second**
+- In-app inbox writes, to our own store rather than a provider: 58k × 25% ≈ **14.5k per second**
+- Provider calls: 52k push + 7.5k email + 1.2k SMS ≈ **61k per second**
+- Provider attempts, counting retries: 61k × 1.03 ≈ **63k per second**
 
 Sizing workers from the 58k figure would under-provision them by 8%. Sizing the FCM quota from it would be off by a third. Two of these numbers should make you stop.
 
 First, **1.56M Android messages per minute**. FCM's HTTP v1 API enforces a per-project quota that counts messages, not requests, and the default is 600k messages per minute <Cite href="https://firebase.google.com/docs/cloud-messaging/throttling-and-quotas" title="FCM throttling and quotas" author="Firebase" />. Our peak is 2.6 times that. A standing increase is at most 25% per request, and only when usage has regularly reached 80% of the current quota and the client error ratio stays under 5%. From 600k, that is five consecutive increases (600k → 750k → 938k → 1.17M → 1.46M → 1.83M), each earned by running close to the previous limit. This is a capacity-planning conversation that starts months before launch, not on launch day.
 
-Second, **1.2k SMS per second**. SMS throughput is allocated per sender. Twilio's documented defaults are 3 message segments per second for a US toll-free number and 100 per second for a short code <Cite href="https://support.twilio.com/hc/en-us/articles/115002943027-Understanding-Twilio-Rate-Limits-and-Message-Queues" title="Understanding Twilio rate limits and message queues" author="Twilio" />. Our peak is about 12 short codes' worth of default throughput.
+Second, **1.2k SMS per second**. SMS throughput is allocated per sender. Twilio's documented defaults are 3 <Term id="sms-segment">message segments</Term> per second for a US toll-free number and 100 per second for a short code <Cite href="https://support.twilio.com/hc/en-us/articles/115002943027-Understanding-Twilio-Rate-Limits-and-Message-Queues" title="Understanding Twilio rate limits and message queues" author="Twilio" />. Our peak is about 12 short codes' worth of default throughput.
 
-<Estimate title="Storage">
-| Quantity                       | Formula                         | Result           |
-| ------------------------------ | ------------------------------- | ---------------- |
-| Notification records per day   | 1B × 500 B                      | 500 GB / day     |
-| Hot retention (90 days)        | 500 GB × 90                     | 45 TB            |
-| With 3× replication            | 45 TB × 3                       | 135 TB           |
-| Status events per day          | 1B × 4 × 100 B                  | 400 GB / day     |
-| Send-log rows per day          | 600M × 1.5 + 130M + 20M         | ≈ 1.05B / day    |
-| Send log (kept ≈ 2 days)       | 1.05B × 100 B × 2               | ≈ 210 GB         |
-| Device registry                | 500M × 2 devices × 200 B        | 200 GB           |
-| Preferences                    | 500M × 1 KB                     | 500 GB           |
-| In-app inbox (30 days)         | 1B × 25% × 30 × 500 B           | 3.75 TB          |
-</Estimate>
+### Storage
+
+We store six kinds of data, each with its own size and lifetime.
+
+**Notification records.** One record per notification holds its ids, category, template version, parameters, and status: about 500 bytes. We keep records for 90 days, for status queries and history.
+
+- Per day: 1B × 500 bytes = **500 GB**
+- For 90 days: 500 GB × 90 = **45 TB**, or **135 TB** with three replicas
+
+**Status events.** Every channel delivery moves through up to four states that a caller can see:
+
+1. **Queued:** accepted and waiting in a channel topic.
+2. **Sent:** handed to the provider, which accepted it.
+3. **Delivered:** the provider, carrier, or mail server confirmed receipt.
+4. **Opened:** the user tapped the push, read the inbox item, or opened the email.
+
+A failure replaces the later states with *failed*, *bounced*, or *expired*, so a delivery still records at most four events. Each event is about 100 bytes.
+
+- Per day: 1B deliveries × 4 events × 100 bytes = **400 GB**
+
+**The send log.** Before every provider call, a worker writes one row per *target*: one per device for push, one per address for email and SMS. That row is how it tells a safe retry from a duplicate (see [reliable delivery](#reliable-delivery)). A row holds the notification id, the target, its state, an attempt id, and a <Term id="lease">lease</Term>: about 100 bytes.
+
+- Rows per day: 600M push × 1.5 devices = 900M, plus 130M email and 20M SMS = **1.05B rows**
+- Rows only need to outlive retries, which stop when a notification's <Term id="ttl">time-to-live (TTL)</Term> passes. Most TTLs are a day or less, and a row is kept one more day as a safety margin, so a row lives about two days: 1.05B rows × 100 bytes × 2 days ≈ **210 GB**
+
+**Device registry.** Assume 500M registered users with 2 devices each, at about 200 bytes per device.
+
+- 500M × 2 × 200 bytes = **200 GB**
+
+**Preferences.** About 1 KB per user.
+
+- 500M × 1 KB = **500 GB**
+
+**In-app inbox.** 250M in-app notifications a day, kept for 30 days, at about 500 bytes each.
+
+- 250M × 30 days × 500 bytes = **3.75 TB**
 
 Storage is large but unremarkable. The device registry and preferences fit comfortably in memory across a cache cluster, which matters because we read them for every notification.
 
-<Estimate title="Concurrency">
-| Quantity                              | Formula                     | Result              |
-| ------------------------------------- | --------------------------- | ------------------- |
-| In-flight provider calls at peak      | 63k / s × 0.1 s             | ≈ 6.3k              |
-| …if providers slow to 1 s             | 63k / s × 1 s               | ≈ 63k               |
-| Status writes at peak                 | 58k deliveries × 4 events   | ≈ 232k writes / s   |
-| 50M-user campaign at 40k msg/s        | 50M ÷ 40k                   | ≈ 21 min            |
-</Estimate>
+### Concurrency
 
-The first two rows come from Little's law: the number of requests in flight equals the arrival rate times the time each request takes. A provider that slows from 100 ms to 1 s multiplies our required concurrency by ten. A slow provider is often more dangerous than a dead one, because a dead one fails fast. We return to this in [Living with providers](#living-with-providers).
+<Term id="littles-law">Little's law</Term> says the number of requests in flight equals the arrival rate times how long each request takes. Assume a provider call takes about 100 ms end to end.
 
-The third row is easy to miss: status updates, not notifications, are our heaviest write path. [Scaling and bottlenecks](#scaling-and-bottlenecks) sizes the store for it.
+- In flight at peak: 63k per second × 0.1 s ≈ **6.3k requests**
+- If providers slow to 1 s: 63k per second × 1 s ≈ **63k requests**
 
-<Estimate title="Cost">
-| Quantity                 | Formula                      | Result            |
-| ------------------------ | ---------------------------- | ----------------- |
-| SMS per day              | 20M × $0.01                  | ≈ $200k / day     |
-| Email per day            | 130M ÷ 1,000 × $0.10         | ≈ $13k / day      |
-| Push per day             | APNs and FCM charge nothing  | $0 (our infrastructure only) |
-| SMS per year             | $200k × 365                  | ≈ $73M / year     |
-</Estimate>
+A provider that slows from 100 ms to 1 s multiplies our required concurrency by ten. A slow provider is often more dangerous than a dead one, because a dead one fails fast. We return to this in [Living with providers](#living-with-providers).
 
-This table changes the design more than any other. SMS is 2% of our volume and about 94% of our provider spend. The $0.01 figure is an assumption built from published list prices — Twilio's US base rate is $0.0083 per segment before carrier fees <Cite href="https://www.twilio.com/en-us/sms/pricing/us" title="SMS pricing in the United States" author="Twilio" /> — and email at $0.10 per 1,000 is Amazon SES's list price <Cite href="https://aws.amazon.com/ses/pricing/" title="Amazon SES pricing" author="Amazon Web Services" />. Real contracts are cheaper at this volume, but the ratio holds: every category that uses SMS must justify it, the channel-selection logic prefers push and in-app wherever the user allows them, and daily SMS spend gets an alert like any other service-level indicator. It also makes SMS the most attractive target for fraud, which we cover in [Security and privacy](#security-and-privacy).
+Status updates, not notifications, are our heaviest write path.
+
+- Status writes at peak: 58k deliveries per second × 4 events ≈ **232k writes per second**
+
+[Scaling and bottlenecks](#scaling-and-bottlenecks) sizes the store for it. Finally, campaigns get a bulk budget of 40k notifications per second at peak, which leaves the rest of the capacity for transactional traffic.
+
+- A 50M-user campaign: 50M ÷ 40k per second = 1,250 seconds ≈ **21 minutes**
+
+### Cost
+
+Assume list prices: about $0.01 per SMS segment including carrier fees (Twilio's US base rate is $0.0083 per segment before them <Cite href="https://www.twilio.com/en-us/sms/pricing/us" title="SMS pricing in the United States" author="Twilio" />), $0.10 per 1,000 emails (Amazon SES's list price <Cite href="https://aws.amazon.com/ses/pricing/" title="Amazon SES pricing" author="Amazon Web Services" />), and nothing per push message.
+
+- SMS: 20M × $0.01 ≈ **$200k per day**, or about **$73M per year**
+- Email: 130M ÷ 1,000 × $0.10 ≈ **$13k per day**
+- Push: APNs and FCM charge nothing per message, so **$0** beyond our own servers
+
+This changes the design more than any other number. SMS is 2% of our volume and about 94% of our provider spend ($200k of $213k a day). Real contracts are cheaper at this volume, but the ratio holds: every category that uses SMS must justify it, the channel-selection logic prefers push and in-app wherever the user allows them, and daily SMS spend gets an alert like any other service-level indicator. It also makes SMS the most attractive target for fraud, which we cover in [Security and privacy](#security-and-privacy).
+
+### At a glance
+
+Later sections refer back to these numbers.
+
+| Quantity                     | Value                                         |
+| ---------------------------- | --------------------------------------------- |
+| Notifications                | 1B per day; 58k per second at peak            |
+| Provider attempts at peak    | 63k per second                                |
+| Android sends at peak        | 1.56M per minute (FCM default: 600k)          |
+| SMS at peak                  | 1.2k per second                               |
+| Status writes at peak        | 232k per second                               |
+| Notification records         | 135 TB for 90 days, replicated                |
+| Provider spend               | about $213k per day, 94% of it SMS            |
 
 ## API design
 
@@ -214,7 +238,7 @@ A few deliberate choices here:
 - **`202 Accepted`, not `200 OK`.** We have recorded the request, not delivered it. Pretending otherwise invites producers to build on a guarantee we cannot make.
 - **`Idempotency-Key` header.** If the producer times out and retries, we return the original `notification_id` instead of creating a second notification. The <Term id="idempotency-key">idempotency key</Term> follows the IETF draft for an `Idempotency-Key` header <Cite href="https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/" title="The Idempotency-Key HTTP Header Field" author="IETF HTTPAPI Working Group" />; the general technique gets its own chapter in Building blocks.
 - **`category`, not channel.** Producers say *what kind* of notification this is. Users' preferences are expressed per category, and the platform picks channels. A producer can request specific channels, but `auto` is the default. A category also carries policy: its priority, whether it may be disabled, what to do on an unknown outcome, and whether its content is sensitive.
-- **`ttl_seconds`.** A "your driver is arriving" push is worthless ten minutes later. Every notification carries a <Term id="ttl">time-to-live (TTL)</Term>, and stale ones are dropped rather than delivered late.
+- **`ttl_seconds`.** A "your driver is arriving" push is worthless ten minutes later. Every notification carries a TTL, and stale ones are dropped rather than delivered late.
 - **`collapse_key`.** Later notifications with the same key replace earlier ones on the device, so "order shipped" can be replaced by "out for delivery" instead of stacking.
 
 ### The rest of the surface
@@ -259,11 +283,11 @@ Our access patterns drive the storage choices:
 
 **Identity and ordering are separate columns.** A `notification_id` is an opaque string with one job: identity. For API requests it is a ULID (a 128-bit, lexicographically sortable unique identifier); for campaign notifications it is `hash(campaign_id, user_id)`, which is deliberately not sortable (see [Fan-out and priority](#fan-out-and-priority)). Because the two kinds of id cannot be ordered against each other, every table that needs time order carries an explicit `created_at` and clusters on `(created_at, notification_id)`. The id breaks ties; it never carries meaning.
 
-**Notifications** are write-heavy, append-mostly, time-ordered per user, and expire after 90 days. That is the textbook fit for a wide-column store such as Cassandra: partition by `user_id`, cluster by `created_at` descending, and set a row TTL so old data deletes itself. Each user's partition stays small: 5 notifications a day for 90 days is 450 rows, about 225 KB. A second table keyed by `notification_id` alone serves status lookups.
+**Notifications** are write-heavy, append-mostly, time-ordered per user, and expire after 90 days. That is the textbook fit for a <Term id="wide-column-store">wide-column store</Term> such as Cassandra: <Term id="partition">partition</Term> by `user_id`, cluster by `created_at` descending, and set a row TTL so old data deletes itself. Each user's partition stays small: 5 notifications a day for 90 days is 450 rows, about 225 KB. A second table keyed by `notification_id` alone serves status lookups.
 
 **Deliveries** record one row per notification per channel: its state, attempt count, and timestamps. This is where the 232k status writes per second land.
 
-**The send log** records one row per notification per *target* — a device for push, an address for email and SMS — and is the guard in front of every provider call. Its lease and epoch columns are explained in [reliable delivery](#reliable-delivery) and [Regions](#regions). It needs a cheap conditional write (compare-and-set), and its rows expire two days after the notification's TTL.
+**The send log** records one row per notification per *target* — a device for push, an address for email and SMS — and is the guard in front of every provider call. Its lease and epoch columns are explained in [reliable delivery](#reliable-delivery) and [Regions](#regions). It needs a cheap conditional write (compare-and-set), and its rows expire a day after the notification's TTL.
 
 **The inbox is its own table.** It is tempting to serve the inbox by filtering `notifications_by_user` to in-app notifications, but a wide-column store cannot filter a partition by a non-key column efficiently: it would read every row and discard most. So the in-app worker writes a projection, `inbox_by_user`, with the rendered title and body and a `read_at` column. A page is a range read on the clustering key, exactly what the cursor encodes. The durable read state is `read_at`; the per-user `unread_count` in the cache is an optimization, incremented when a row is written and decremented on mark-read, and recomputed from the table whenever the app opens.
 
@@ -380,10 +404,6 @@ Why this shape?
 - **One topic per channel** isolates channels from each other. An email provider outage backs up the email topic; push keeps flowing.
 - **The processor is where policy lives.** Preferences, caps, quiet hours, and channel choice are decided once, in one place, instead of in every producer.
 
-<Callout type="interview">
-Draw this diagram in under ten minutes, then say which three parts you want to go deep on. Strong candidates pick the parts with real trade-offs: delivery guarantees, priority and fan-out, and provider limits. Weaker answers spend twenty minutes on the database schema.
-</Callout>
-
 ## Deep dives
 
 ### Never lose a notification, rarely send one twice [#reliable-delivery]
@@ -448,7 +468,7 @@ Failing over to a second provider interacts with the same problem. After a *defi
 Exactly-once processing inside a broker does not extend to an HTTP call to Apple. Once a side effect leaves your system, the best you can do is at-least-once delivery plus idempotent or collapsible effects, and an honest record of what you do not know. Saying this clearly in an interview is worth more than any amount of distributed-transaction machinery.
 </Callout>
 
-**Retries without blocking.** A failed send must wait before retrying, but a worker that sleeps holds its partition hostage: every message behind it waits too. Instead, the worker publishes the message to a **delay topic** and moves on. Each delay topic is consumed by workers that wait until the message's due time. The normal lane uses `retry-2s`, `retry-30s`, `retry-5m`, and so on; the high lane uses a single short delay of a few hundred milliseconds, because its latency budget (below) has room for exactly one retry. Delays follow <Term id="exponential-backoff">exponential backoff</Term> with random jitter, so a provider recovering from an outage is not hit by a synchronized wall of retries <Cite href="https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/" title="Exponential Backoff And Jitter" author="Marc Brooker" year="2015" />.
+**Retries without blocking.** A failed send must wait before retrying, but a worker that sleeps holds its partition hostage: every message behind it waits too. Instead, the worker publishes the message to a **delay topic** and moves on. Each delay topic is consumed by workers that wait until the message's due time. The normal lane uses `retry-2s`, `retry-30s`, `retry-5m`, and so on; the high lane uses a single short delay of a few hundred milliseconds, because its latency budget (below) has room for exactly one retry. Delays follow <Term id="exponential-backoff">exponential backoff</Term> with random <Term id="jitter">jitter</Term>, so a provider recovering from an outage is not hit by a synchronized wall of retries <Cite href="https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/" title="Exponential Backoff And Jitter" author="Marc Brooker" year="2015" />.
 
 What we retry depends on what the provider told us:
 
@@ -487,7 +507,7 @@ At 9:00 on a Monday, marketing launches a campaign to 50M users. At 9:01, a user
 
 Separate topics and pools give isolation in time: a backlog in `bulk` cannot delay a message in `high`. But all three lanes still share one provider quota, so the provider rate limiter divides it. `high` and `normal` get reserved shares; `bulk` gets whatever is left. When a burst of login codes arrives, the campaign slows down automatically. Netflix's RENO system uses the same idea, routing events into separate queues by priority with their own processing clusters <Cite href="https://www.infoq.com/news/2022/03/netflix-reno/" title="Netflix's RENO Keeps Experience Consistent across Devices" author="InfoQ" year="2022" />.
 
-The rate limiter is a token bucket per provider and lane (rate-limiting algorithms get their own chapter in Building blocks). With hundreds of workers, a central counter becomes a hot spot, so each worker leases a slice of the budget — "you may send 200 messages per second for the next 10 seconds" — and renews it. The limiter trades a little precision for not putting a network hop in front of every send. Leases also make the limiter adaptive. When a provider answers `429`, the coordinator halves the lane's total rate; after a quiet interval it adds back a small fixed step. That is additive increase, multiplicative decrease (AIMD), the same rule the Transmission Control Protocol (TCP) uses for congestion: back off fast, probe back slowly, and settle a little under the provider's real limit, which is often lower than its published one.
+The rate limiter is a <Term id="token-bucket">token bucket</Term> per provider and lane (rate-limiting algorithms get their own chapter in Building blocks). With hundreds of workers, a central counter becomes a hot spot, so each worker leases a slice of the budget — "you may send 200 messages per second for the next 10 seconds" — and renews it. The limiter trades a little precision for not putting a network hop in front of every send. Leases also make the limiter adaptive. When a provider answers `429`, the coordinator halves the lane's total rate; after a quiet interval it adds back a small fixed step. That is <Term id="aimd">additive increase, multiplicative decrease (AIMD)</Term>, the same rule the Transmission Control Protocol (TCP) uses for congestion: back off fast, probe back slowly, and settle a little under the provider's real limit, which is often lower than its published one.
 
 **Where the five seconds go.** The high lane's target is a p99 of 5 s from acceptance to provider handoff. The work itself takes well under a second; the budget exists to absorb queueing and exactly one retry.
 
@@ -534,10 +554,6 @@ Segments are snapshotted when a fan-out job starts. A user who joins the segment
 </Aside>
 
 **Canary the campaign.** Before the fan-out runs at full speed, the scheduler releases the first page or two, a few thousand users, and pauses for a few minutes while the tracking service watches provider error rates, bounce and complaint rates, and the suppression rate. A broken deep link, a template with an unrendered `{{first_name}}`, or an audience that turns out to include opted-out users shows up in that sample at a cost of thousands of bad sends instead of millions. Marketing teams call this a seed or test send. We make it a mandatory stage of every bulk job rather than a courtesy.
-
-<Callout type="interview">
-When the interviewer asks "how do you send to 50M users?", the expected answer is not "a bigger queue". It is batching, checkpointing, deterministic ids for idempotency, a canary, and a priority lane so the campaign cannot starve transactional traffic.
-</Callout>
 
 **Scheduling: the timer problem.** Four features release something at a future time: quiet hours, "send at 09:00 local", digest windows, and escalation checks (all described below). Delay topics suit the short, fixed waits that retries need, but "07:00 tomorrow" can be ten hours away, and holding a message in a broker partition for ten hours blocks everything behind it. Long waits need a store, not a queue. <FigRef id="scheduler" /> shows the design.
 
@@ -715,10 +731,6 @@ Start from the peak of 58k notifications and 63k provider attempts per second, a
 - **Hot users.** A viral post can generate millions of "liked your photo" events for one account in minutes, all landing on one partition. Aggregation collapses them into a handful of digests and the per-user cap bounds the rest, so the partition spends its time counting rather than sending. A cap on raw events per user per minute at the API protects the partition from the counting too.
 - **FCM quota.** The 1.56M per-minute Android peak needs five standing increases from the default, each requested only after usage sits near the previous limit. Until then, the bulk lane absorbs the shortfall by slowing down.
 
-<Callout type="interview" title="What breaks first?">
-When asked how the design scales, do not say "add more servers". Name the first real limit with a number: here it is a provider quota, not anything we run. Then name the second (status writes) and what you would do about each.
-</Callout>
-
 **At ×10 (580k msg/s, 10B notifications a day):**
 - Processors, channel workers, and topics scale horizontally; their per-user state already lives in shared stores, so adding instances is a rebalance, not a migration.
 - Provider quotas dominate. Android peak becomes about 15.6M messages per minute, 26 times FCM's default quota, reachable only through a long series of standing increases planned with the provider. SMS needs many registered senders and usually several providers.
@@ -751,7 +763,7 @@ Running in several regions protects against losing one, but only if we are preci
 
 **Fencing the old region.** The danger in failover is not only losing work; it is two regions sending the same work. If region A comes back while region B has taken over, A's workers still have messages and leases. The epoch prevents that: every send-log claim carries the user's current epoch, the store rejects a claim with an older one, and the directory is the only place the epoch changes. A returning region finds its epoch stale and stops. This is the same idea as a <Term id="fencing-token">fencing token</Term> in any lease-based system.
 
-**What failover costs.** We state it in the two standard numbers. The recovery time objective (RTO) is minutes: flip the directory, warm the consumers, resume. The recovery point objective (RPO) is the replication lag, a few seconds, and it has two concrete effects. A notification accepted in region A whose request had not yet been mirrored is lost — the one exception to our durability promise, and the reason it says "short of losing an entire region". A notification region A sent whose send-log row had not yet replicated may be sent again by region B, and its category's indeterminate-outcome policy decides whether that is acceptable. If a category cannot accept either, the high lane can replicate its request topic synchronously across regions, at the cost of a cross-region round trip on every login code. That is a trade we make per category, not for the platform.
+**What failover costs.** We state it in the two standard numbers. The <Term id="rto">recovery time objective (RTO)</Term> is minutes: flip the directory, warm the consumers, resume. The <Term id="rpo">recovery point objective (RPO)</Term> is the replication lag, a few seconds, and it has two concrete effects. A notification accepted in region A whose request had not yet been mirrored is lost — the one exception to our durability promise, and the reason it says "short of losing an entire region". A notification region A sent whose send-log row had not yet replicated may be sent again by region B, and its category's indeterminate-outcome policy decides whether that is acceptable. If a category cannot accept either, the high lane can replicate its request topic synchronously across regions, at the cost of a cross-region round trip on every login code. That is a trade we make per category, not for the platform.
 
 **Consent lags too.** An opt-out written in region A a second before it failed may not have reached region B. A marketing send to that user is a message they refused, and the consent rules that matter most are about exactly that. So after a failover, region B holds marketing for the affected users until replication has caught up, or for a fixed grace period when the old region cannot be read at all. Security alerts keep the fail-open policy the categories already declare. It is the same asymmetry as the preference-service outage, applied to geography.
 

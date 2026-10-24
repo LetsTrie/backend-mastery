@@ -67,8 +67,9 @@ never rename a token without updating print.
 | full | wide | text (≈ 68ch) | wide | full |
 ```
 
-- Prose sits in `text`. `<Figure width="wide">`, tables, estimates, trade-offs,
-  and code break out to `wide`; `full` is rare.
+- Prose sits in `text`, and so do tables, estimates, trade-offs, and code:
+  their edges align with the paragraphs. Only `<Figure width="wide">` breaks out
+  to `wide`; `full` is rare.
 - Beside the sidebar the reading grid is asymmetric: a small fixed gap on the
   left, spare room on the right for margin notes. `--breakout` is 4.5rem.
 - `<Aside>` hangs in the right margin on ≥ 1408 px (9.5rem wide), inline below.
@@ -87,10 +88,12 @@ for whole-card links), `.section-label`, `.chapter-row`, `.nav-link`,
 
 ## Chapter page anatomy
 
-1. Breadcrumb (Chapters / Part) · eyebrow (chapter number, kind) · title · subtitle.
-2. Meta strip: reading time, diagrams, sources, dates, status; topic chips;
-   a quiet notice for draft, review, or archived.
-3. `<KeyTakeaways>`, then the body. Blueprint `##` sections are numbered (01, 02…)
+1. Eyebrow (chapter number, kind) · title · subtitle. No breadcrumb.
+2. Meta strip: author (icon + name, no "By"), published date, reading time,
+   status; `#tag` chips; a quiet notice for draft, review, or archived. No
+   diagram/source counts and no "updated" date in the header (revisions live in
+   the end matter).
+3. The body. Blueprint `##` sections are numbered (01, 02…)
    by CSS counters; the first paragraph gets a drop cap where supported.
 4. End matter: related chapters (chips), references, revision history, how to
    cite, edit/report links, previous/next cards.

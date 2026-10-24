@@ -48,7 +48,7 @@ with any ❌.
 
 **Structure**
 - [ ] All blueprint sections present, in order, with fixed `##` headings.
-- [ ] `<KeyTakeaways>` matches what the chapter actually concludes.
+- [ ] Estimates are inline: each calculation sits beside its assumption; units spelled out ("bytes").
 - [ ] 2–4 deep dives; each has problem → options → choice → figure.
 - [ ] `<Tradeoffs>` table covers every major decision.
 - [ ] Building blocks are linked, not re-explained.

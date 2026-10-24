@@ -55,6 +55,8 @@ Write so that a reader can:
 - Code identifiers, field names, endpoints, and config keys in backticks.
 - Units: `ms`, `s`, `KB`, `MB`, `GB`, `TB` (decimal, powers of 1000 for
   estimates), `QPS` for queries, `RPS` for HTTP requests, `msg/s` for messages.
+  Spell out **bytes** ("100 bytes", "≈ 2 KB per user"): a bare `B` reads as
+  billion next to `1B notifications`.
   Always a space between number and unit: `200 ms`, not `200ms`.
 - Large numbers: `10M`, `1.2B` in prose and tables; `10,000` when exactness matters.
 - Percentiles as `p50`, `p99`, `p99.9`. Availability as `99.9%` with the
@@ -69,6 +71,8 @@ Write so that a reader can:
 - Unsure? Write `TODO(verify): …` inline. Don't paper over gaps.
 - Never present an interview-style answer as "the" answer. Real designs have
   alternatives; show the one we chose and why.
+- No interview-coaching asides ("Scope it in the first five minutes…"). The
+  chapter teaches the design; readers preparing for interviews get that for free.
 
 ## Code in chapters
 
@@ -87,4 +91,4 @@ Write so that a reader can:
 - Depth, not padding: every section must still earn its place with a decision,
   an insight, a number, or a figure. Cut repetition and filler, never substance.
 - Long chapters stay navigable through the fixed blueprint headings, the table
-  of contents, `<KeyTakeaways>`, and the Summary.
+  of contents, and the Summary.

@@ -20,10 +20,10 @@ subsections freely.
 
 | #  | `##` heading                    | Must contain                                                                                   |
 | -- | ------------------------------- | ---------------------------------------------------------------------------------------------- |
-| 0  | *(no heading — intro)*          | `<KeyTakeaways>` (3–5 bullets) then 1–3 paragraphs: what we're building and why it's hard.      |
+| 0  | *(no heading — intro)*          | 1–3 paragraphs: what we're building and why it's hard. No summary box; the subtitle sets up the read. |
 | 1  | Problem and scope               | What the system does, who uses it, what is explicitly **out of scope**.                        |
 | 2  | Requirements                    | `### Functional`, `### Non-functional` (each with a number: latency, availability, durability). |
-| 3  | Back-of-the-envelope estimation | `<Estimate>` table(s): traffic, storage, bandwidth, with assumptions and units shown.           |
+| 3  | Back-of-the-envelope estimation | `###` subsections (traffic, storage, …). Each calculation sits right beside its assumption (see below); optional "At a glance" summary table at the end. |
 | 4  | API design                      | Endpoints / events / contracts. Request + response shapes. Idempotency and pagination stated.   |
 | 5  | Data model                      | Entities, keys, access patterns → storage choice. Partition / shard key justified.              |
 | 6  | High-level design               | One overview figure + a walkthrough of the main request path(s), numbered to match the figure.  |
@@ -45,12 +45,24 @@ Rules:
   numbered list exactly.
 - Estimation numbers flow downstream: if section 3 says 12k QPS peak, section 8
   must scale *from 12k*, not a new made-up number.
+- Estimates read top to bottom without jumping back: state an assumption, then
+  the calculation that uses it, then the bolded result, then the next assumption.
+  Never collect every assumption in one list and every formula in a distant table.
+  Explain any number a reader can't derive at a glance (what a "status event"
+  is, why rows are kept two days).
+
+```mdx
+**Assume 10M DAU, 5 notifications per user per day.**
+
+- 10M × 5 = **50M notifications/day**
+- 50M ÷ 86,400 s ≈ **580 per second** on average
+```
 
 ## B. Building-block chapter ("Consistent hashing", "Idempotency", …)
 
 | `##` heading         | Must contain                                                       |
 | -------------------- | ------------------------------------------------------------------ |
-| *(intro)*            | `<KeyTakeaways>` + the problem this concept solves, in one breath. |
+| *(intro)*            | The problem this concept solves, in one breath.                    |
 | The problem          | A concrete failing example without the concept.                    |
 | How it works         | Mechanism, step by step, with figures.                             |
 | Variants             | Common variations and when each fits.                              |

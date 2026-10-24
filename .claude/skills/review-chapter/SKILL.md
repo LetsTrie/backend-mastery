@@ -18,7 +18,8 @@ Be a demanding senior reviewer. The goal is a chapter readers trust for years.
 1. **Frontmatter** — validate every field against `frontmatter-schema.md`.
    Slug equals folder name; part exists in `parts.yml`; prerequisites exist.
 2. **Structure** — list the `##` headings and diff them against the blueprint.
-3. **Math** — recompute every `<Estimate>` row yourself. Then trace each
+3. **Math** — recompute every inline calculation and `<Estimate>` row yourself,
+   and check each one sits beside the assumption it uses. Then trace each
    derived number (peak QPS, storage/year, bandwidth) through later sections
    and flag any inconsistency.
 4. **Design soundness** — for each component, can you name the problem it

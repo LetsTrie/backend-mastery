@@ -57,7 +57,8 @@ revisions:                              # human-facing changelog, newest first
   entry for meaningful changes (new section, corrected fact, new figure).
   Typo fixes don't need a revision entry.
 - `tags`: check existing tags across `content/chapters/*/index.mdx` before
-  inventing one. Max 6 tags.
+  inventing one. 6–10 tags: the domain (`system-design`), the core techniques
+  (`fan-out`, `idempotency`), and the reader's intent (`interview-prep`). Max 10.
 - `prerequisites` must reference existing chapter slugs (content lint checks).
 - Reading time and word count are **computed**, never stored.
 - Drafts (`status: draft | review`) render in dev and preview deployments only,

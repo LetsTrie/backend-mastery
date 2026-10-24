@@ -33,11 +33,11 @@ parts:
   - key: case-studies
     title: Case studies
     description: End-to-end designs of real-world systems, from requirements to failure modes.
-    chapters: []
+    chapters:
+      - design-a-notification-service
     planned:
       - design-a-rate-limiter
       - design-a-url-shortener
-      - design-a-notification-system
       - design-a-chat-system
       - design-a-news-feed
       - design-a-distributed-job-scheduler

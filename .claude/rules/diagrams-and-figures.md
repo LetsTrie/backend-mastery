@@ -67,6 +67,7 @@ by the render script, which swaps the import to produce `<id>.dark.svg`).
 | Third-party / external provider | `external`   | cloud        | Not ours (APNs, Twilio, …)       |
 | Scheduled / batch job           | `job`        | rectangle (dashed) | Cron, batch, offline       |
 | Logical group / boundary        | `boundary`   | container (dashed) | Region, VPC, team boundary |
+| State (state machines only)     | `state`      | pill (rounded) | A lifecycle state, not a component |
 
 Edges:
 - Solid arrow = synchronous request. Dashed arrow (`class: async`) = asynchronous

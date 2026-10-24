@@ -1,0 +1,28 @@
+...@../../../_shared/d2/base
+
+direction: down
+
+accepted: accepted {class: state}
+processing: processing {class: state}
+suppressed: suppressed {class: state}
+scheduled: scheduled {class: state}
+queued: queued {class: state}
+sending: sending {class: state}
+retry_wait: retry_wait {class: state}
+sent: sent {class: state}
+delivered: delivered {class: state}
+expired: expired {class: state}
+dead: dead_lettered {class: state}
+
+accepted -> processing
+processing -> suppressed: "opted out, capped, duplicate"
+processing -> scheduled: "quiet hours, send-at"
+scheduled -> queued: "timer fires"
+processing -> queued: "route to channel"
+queued -> sending
+sending -> sent: "provider 2xx" {class: focus}
+sending -> retry_wait: "timeout, 429, 5xx" {class: failure}
+retry_wait -> queued: "backoff elapsed"
+retry_wait -> expired: "TTL passed"
+retry_wait -> dead: "attempts exhausted" {class: failure}
+sent -> delivered: "receipt (if channel reports)"

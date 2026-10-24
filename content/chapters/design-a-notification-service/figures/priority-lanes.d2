@@ -1,0 +1,35 @@
+...@../../../_shared/d2/base
+
+direction: down
+
+processor: Notification processor {class: service}
+
+lanes: Priority lanes {
+  class: boundary
+  direction: right
+  high: "high: OTP, security" {class: queue}
+  normal: "normal: orders, social" {class: queue}
+  bulk: "bulk: campaigns" {class: queue}
+}
+
+pools: Worker pools {
+  class: boundary
+  direction: right
+  high: High pool {class: service}
+  normal: Normal pool {class: service}
+  bulk: Bulk pool {class: service}
+}
+
+limiter: Provider rate limiter {class: gateway}
+provider: Provider {class: external}
+
+processor -> lanes.high {class: async}
+processor -> lanes.normal {class: async}
+processor -> lanes.bulk {class: async}
+lanes.high -> pools.high {class: [async; focus]}
+lanes.normal -> pools.normal {class: async}
+lanes.bulk -> pools.bulk {class: async}
+pools.high -> limiter: "reserved share"
+pools.normal -> limiter: "reserved share"
+pools.bulk -> limiter: "leftover only"
+limiter -> provider

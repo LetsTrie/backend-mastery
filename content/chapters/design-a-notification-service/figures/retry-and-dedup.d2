@@ -1,0 +1,20 @@
+...@../../../_shared/d2/base
+
+shape: sequence_diagram
+
+worker: Push worker {class: service}
+log: Send log {class: datastore}
+apns: APNs {class: external}
+retry: Retry topic {class: queue}
+
+worker -> log: "① claim (id, push): absent → attempting"
+worker -> apns: "② POST, apns-collapse-id = id"
+apns -> worker: "timeout: outcome unknown" {class: failure}
+worker -> retry: "③ requeue, attempt 2, delay 2 s" {class: async}
+retry -> worker: "④ redeliver after delay" {class: async}
+worker -> log: "⑤ claim: attempting → retry allowed"
+worker -> apns: "⑥ POST again, same collapse id"
+apns -> worker: "⑦ 200 OK"
+worker -> log: "⑧ mark sent"
+retry -> worker: "duplicate redelivery after a crash" {class: async}
+worker -> log: "claim: already sent → skip" {class: focus}

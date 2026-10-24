@@ -1,0 +1,19 @@
+...@../../../_shared/d2/base
+
+direction: right
+
+order: Order service {class: service}
+
+providers: Providers {
+  class: boundary
+  direction: down
+  apns: APNs {class: external}
+  fcm: FCM {class: external}
+  email: Email provider {class: external}
+  sms: SMS provider {class: external}
+}
+
+order -> providers.apns: "sync HTTPS"
+order -> providers.fcm: "sync HTTPS"
+order -> providers.email: "sync HTTPS"
+order -> providers.sms: "sync HTTPS" {class: failure}

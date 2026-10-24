@@ -2,20 +2,41 @@
 # `owner` is the chapter that explains the term in depth (may be planned).
 # Definitions: one or two plain sentences, no circular references.
 
+at-least-once-delivery:
+  term: At-least-once delivery
+  definition: A guarantee that every message is delivered one or more times; nothing is lost, but consumers must tolerate duplicates.
+  owner: message-queues
+
 backpressure:
   term: Backpressure
   definition: A mechanism by which a slower downstream component signals upstream producers to slow down, instead of buffering without bound.
   owner: message-queues
+
+circuit-breaker:
+  term: Circuit breaker
+  definition: A guard around calls to a dependency that stops sending requests for a cool-down period after repeated failures, so a sick dependency is not overwhelmed and callers fail fast.
 
 dead-letter-queue:
   term: Dead-letter queue (DLQ)
   definition: A separate queue that holds messages a consumer repeatedly failed to process, so they can be inspected without blocking healthy traffic.
   owner: message-queues
 
+device-token:
+  term: Device token
+  definition: An opaque address issued by a push provider (APNs or FCM) that identifies one app installation on one device; it can change or become invalid at any time.
+
+exponential-backoff:
+  term: Exponential backoff
+  definition: A retry policy that multiplies the wait between attempts (for example 1 s, 2 s, 4 s), usually with random jitter so many clients do not retry in lockstep.
+
 fan-out:
   term: Fan-out
   definition: Delivering one logical event to many recipients or downstream consumers.
   owner: design-a-news-feed
+
+head-of-line-blocking:
+  term: Head-of-line blocking
+  definition: When work at the front of a queue is slow or stuck, everything behind it waits, even if that later work is urgent or would be fast.
 
 idempotency-key:
   term: Idempotency key
@@ -31,6 +52,10 @@ qps:
   term: Queries per second (QPS)
   definition: The number of requests a system or component handles each second; we distinguish average from peak.
   owner: back-of-the-envelope-estimation
+
+transactional-outbox:
+  term: Transactional outbox
+  definition: A pattern where a service writes outgoing messages to an outbox table in the same database transaction as its state change; a relay publishes them afterwards, so the two never disagree.
 
 ttl:
   term: Time-to-live (TTL)

@@ -1,0 +1,48 @@
+...@../../../_shared/d2/base
+
+direction: right
+
+notifications: {
+  shape: sql_table
+  user_id: uuid {constraint: primary_key}
+  notification_id: timeuuid {constraint: primary_key}
+  category: text
+  template_id: text
+  params: blob
+  priority: text
+  status: text
+  expires_at: timestamp
+}
+
+deliveries: {
+  shape: sql_table
+  notification_id: timeuuid {constraint: primary_key}
+  channel: text {constraint: primary_key}
+  state: text
+  attempt: int
+  provider_msg_id: text
+  updated_at: timestamp
+}
+
+devices: {
+  shape: sql_table
+  user_id: uuid {constraint: primary_key}
+  device_id: uuid {constraint: primary_key}
+  platform: text
+  token: text {constraint: unique}
+  app_version: text
+  last_seen: timestamp
+}
+
+preferences: {
+  shape: sql_table
+  user_id: uuid {constraint: primary_key}
+  timezone: text
+  quiet_hours: text
+  channel_matrix: blob
+  updated_at: timestamp
+}
+
+notifications.notification_id -> deliveries.notification_id
+notifications.user_id -> devices.user_id
+notifications.user_id -> preferences.user_id

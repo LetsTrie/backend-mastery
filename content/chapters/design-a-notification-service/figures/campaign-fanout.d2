@@ -1,0 +1,20 @@
+...@../../../_shared/d2/base
+
+direction: down
+
+campaigns: Campaign service {class: service}
+scheduler: Scheduler {class: job}
+fanout: Fan-out workers {class: service}
+segments: Segment store {class: datastore}
+progress: Campaign progress {class: datastore}
+batches: Batch topic {class: queue}
+processor: Notification processor {class: service}
+bulk: Bulk lane {class: queue}
+
+campaigns -> scheduler: "① schedule: 09:00 local"
+scheduler -> fanout: "② one job per UTC-offset bucket"
+fanout -> segments: "③ page 1,000 user IDs"
+fanout -> progress: "④ checkpoint cursor"
+fanout -> batches: "⑤ one message per page" {class: async}
+batches -> processor: "⑥ expand: id = hash(campaign, user)" {class: [async; focus]}
+processor -> bulk: "⑦ per-user notifications" {class: async}

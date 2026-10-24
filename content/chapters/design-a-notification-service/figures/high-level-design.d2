@@ -1,0 +1,45 @@
+...@../../../_shared/d2/base
+
+direction: down
+
+producers: Producer services {class: service}
+api: Notification API {class: service}
+idem: Idempotency store {class: cache}
+requests: Request topic {class: queue}
+processor: Notification processor {class: service}
+
+lookups: Lookups {
+  class: boundary
+  direction: right
+  prefs: Preferences {class: datastore}
+  devices: Device registry {class: datastore}
+  templates: Templates {class: datastore}
+}
+
+channels: Channel topics {
+  class: boundary
+  grid-columns: 2
+  push: push {class: queue}
+  email: email {class: queue}
+  sms: sms {class: queue}
+  inapp: in-app {class: queue}
+}
+
+workers: Channel workers {class: service}
+providers: "Providers (APNs, FCM, email, SMS)" {class: external}
+inbox: Inbox store {class: datastore}
+tracking: Tracking service {class: service}
+status: Status store {class: datastore}
+
+producers -> api: "① POST /v1/notifications"
+api -> idem: "② check key"
+api -> requests: "③ append, then 202" {class: async}
+requests -> processor: "④ consume" {class: async}
+processor -> lookups: "⑤ look up, render"
+processor -> channels: "⑥ one message per channel" {class: async}
+channels -> workers: {class: async}
+workers -> providers: "⑦ send" {class: focus}
+workers -> inbox: "⑦ write"
+providers -> tracking: "⑧ delivery webhooks" {class: async}
+tracking -> status
+workers -> status: "sent / failed"

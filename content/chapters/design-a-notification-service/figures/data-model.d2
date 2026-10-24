@@ -8,9 +8,11 @@ notifications: {
   notification_id: timeuuid {constraint: primary_key}
   category: text
   template_id: text
+  template_version: int
   params: blob
   priority: text
   status: text
+  read_at: timestamp
   expires_at: timestamp
 }
 

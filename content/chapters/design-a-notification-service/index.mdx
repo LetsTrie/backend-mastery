@@ -18,6 +18,14 @@ references:
     authors: "Martin Kleppmann"
     year: 2017
     url: https://dataintensive.net/
+  - title: "Release It! Second Edition: Design and Deploy Production-Ready Software"
+    authors: "Michael Nygard"
+    year: 2018
+    url: https://pragprog.com/titles/mnee2/release-it-second-edition/
+  - title: "Enterprise Integration Patterns"
+    authors: "Gregor Hohpe, Bobby Woolf"
+    year: 2003
+    url: https://www.enterpriseintegrationpatterns.com/
 revisions: []
 ---
 
@@ -26,7 +34,7 @@ revisions: []
 - Delivery is at-least-once all the way down, so every layer deduplicates, from the API's idempotency key to a send log to the provider's collapse id.
 - Separate lanes by priority, because a one-time password must never wait behind a 50-million-user marketing campaign.
 - The hardest part is not sending; it is deciding not to send: preferences, quiet hours, frequency caps, and digests protect the person on the other end.
-- Third-party providers set your real limits. Their quotas, token lifecycles, and outages shape the design more than your own servers do.
+- Third-party providers set your real limits and your real costs. Their quotas, token lifecycles, outages, and per-message prices shape the design more than your own servers do.
 </KeyTakeaways>
 
 Every product eventually needs to tap someone on the shoulder. Your order shipped. Someone replied to your comment. Here is your login code. It looks like the easiest feature in the backlog: call Apple, call Google, call an email provider, done.
@@ -88,6 +96,8 @@ Notice what is *not* on the list: exactly-once delivery and global ordering. We 
 - A notification record is about 500 B; each one produces about 4 status events of 100 B.
 - 500M registered users with 2 devices each on average.
 - A provider call takes about 100 ms end to end.
+- Bulk sends get a budget of 40k msg/s at peak; the rest of the capacity is reserved for transactional lanes.
+- Provider prices, for the cost estimate: about $0.01 per SMS segment all-in, $0.10 per 1,000 emails, and no per-message fee for push.
 
 <Estimate title="Traffic">
 | Quantity                 | Formula                    | Result            |
@@ -134,6 +144,17 @@ Storage is large but unremarkable. The device registry and preferences fit comfo
 The first two rows come from Little's law: the number of requests in flight equals the arrival rate times the time each request takes. A provider that slows from 100 ms to 1 s multiplies our required concurrency by ten. A slow provider is often more dangerous than a dead one, because a dead one fails fast. We return to this in [Living with providers](#living-with-providers).
 
 The third row is easy to miss: status updates, not notifications, are our heaviest write path.
+
+<Estimate title="Cost">
+| Quantity                 | Formula                      | Result            |
+| ------------------------ | ---------------------------- | ----------------- |
+| SMS per day              | 20M × $0.01                  | ≈ $200k / day     |
+| Email per day            | 130M ÷ 1,000 × $0.10         | ≈ $13k / day      |
+| Push per day             | APNs and FCM charge nothing  | $0 (our infrastructure only) |
+| SMS per year             | $200k × 365                  | ≈ $73M / year     |
+</Estimate>
+
+This table changes the design more than any other. SMS is 2% of our volume and about 94% of our provider spend. The $0.01 figure is an assumption built from published list prices — Twilio's US base rate is $0.0083 per segment before carrier fees <Cite href="https://www.twilio.com/en-us/sms/pricing/us" title="SMS pricing in the United States" author="Twilio" /> — and email at $0.10 per 1,000 is Amazon SES's list price <Cite href="https://aws.amazon.com/ses/pricing/" title="Amazon SES pricing" author="Amazon Web Services" />. Real contracts are cheaper at this volume, but the ratio holds: every category that uses SMS must justify it, the channel-selection logic prefers push and in-app wherever the user allows them, and daily SMS spend gets an alert like any other service-level indicator.
 
 ## API design
 
@@ -183,9 +204,13 @@ A few deliberate choices here:
 | `PUT /v1/users/{id}/preferences`           | Opt in or out per category × channel; quiet hours; time zone   |
 | `POST /v1/users/{id}/devices`              | Register or refresh a <Term id="device-token">device token</Term> |
 | `DELETE /v1/users/{id}/devices/{device_id}`| Unregister on logout                                           |
+| `GET /v1/users/{id}/inbox`                 | In-app inbox, newest first, with the unread count              |
+| `POST /v1/users/{id}/inbox/{nid}/read`     | Mark one notification read; updates the unread count and badge |
 | `POST /internal/providers/{name}/events`   | Webhooks from providers: delivered, bounced, complained        |
 
 Campaigns return a `campaign_id` and are always asynchronous. Status queries are eventually consistent: a notification may show `queued` for a moment after the push has already arrived. That is acceptable for a status page and keeps the write path cheap.
+
+Two smaller points. First, `recipient` can also be a raw address (`{ "email": "…" }`) for flows that happen before a user exists, such as invitations. Those bypass per-user preferences, because there is no user, but they still obey the global suppression list of bounced and complaining addresses. Second, the API enforces per-producer quotas and answers `429 Too Many Requests` when a producer exceeds them. That is the platform's <Term id="backpressure">backpressure</Term> toward producers: a runaway loop is throttled at the door rather than absorbed into the queue.
 
 ## Data model
 
@@ -217,6 +242,10 @@ Our access patterns drive the storage choices:
 
 **Templates** are versioned and localized, and they are few and edited by humans, so a relational database is the right home. Workers cache compiled templates in memory.
 
+**The inbox is a view, not a table.** Access pattern 2, a user's recent notifications newest first, is exactly what `notifications_by_user` already stores, so the in-app inbox reads that table filtered to notifications that chose the in-app channel. We add `read_at` to the row and keep an `unread_count` per user in the cache, incremented when the in-app worker writes a row and decremented on mark-read. The badge on the app icon is that counter. Because a counter can drift under concurrent updates, the app recomputes it from the inbox each time it opens.
+
+**Pin the template version at acceptance.** A notification accepted at 09:00 against template v7 and rendered at 09:03, after v8 deployed, should still render v7. Otherwise a campaign in flight changes wording halfway through, and a status query can no longer say what the user saw. The processor resolves `template` to a specific version the first time it sees a request and stores that version in the record.
+
 <Tabs>
   <Tab label="Wide-column (chosen)">
 
@@ -226,9 +255,11 @@ CREATE TABLE notifications_by_user (
   notification_id timeuuid,
   category        text,
   template_id     text,
+  template_version int,
   params          blob,
   priority        text,
   status          text,
+  read_at         timestamp,
   PRIMARY KEY ((user_id), notification_id)
 ) WITH CLUSTERING ORDER BY (notification_id DESC)
   AND default_time_to_live = 7776000;  -- 90 days
@@ -243,9 +274,11 @@ CREATE TABLE notifications (
   user_id         uuid NOT NULL,
   category        text NOT NULL,
   template_id     text NOT NULL,
+  template_version int NOT NULL,
   params          jsonb,
   priority        text NOT NULL,
   status          text NOT NULL,
+  read_at         timestamptz,
   created_at      timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX ON notifications (user_id, created_at DESC);
@@ -320,7 +353,13 @@ Our durability promise starts before our API and ends after the provider. Let us
 
 **API to topic.** The API returns `202` only after the request topic has acknowledged the write on multiple replicas (for Kafka, `acks=all` with a minimum in-sync replica count of 2). If the broker is unreachable, the API returns `503` and the producer retries with the same idempotency key. We never acknowledge a request we have not durably stored.
 
-The idempotency store maps `(producer_id, idempotency_key)` to a `notification_id` for 24 hours. The insert is conditional ("insert if absent"), so two concurrent retries with the same key cannot both win.
+The idempotency store maps `(producer_id, idempotency_key)` to a `notification_id` for 24 hours. The order of operations matters more than it looks. If the API appended to the topic first and recorded the key second, two concurrent retries could both append, with two different ids that nothing downstream could relate. If it recorded the key first and the append then failed, the key would point at a notification that never existed, and every later retry would get a confident `202` for a ghost. So the API does both, in this order:
+
+1. Conditionally insert the key with a freshly generated `notification_id` and the state `pending`. If the key already exists, reuse its id.
+2. Append the request, carrying that id, to the topic.
+3. Mark the key `accepted`, best effort.
+
+A retry that finds the key still `pending` repeats step 2 with the *same* id. The topic may then hold the request twice, which is at-least-once again, but both copies share one `notification_id`, and the processor's first stage drops the second. Every duplicate this system can produce is a duplicate it can recognize.
 
 **Topic to processor to channel topics.** Consumers commit their offset only after publishing downstream. A processor that crashes mid-batch replays from its last committed offset and republishes some messages. That is at-least-once, and the duplicates carry the same `notification_id`, so the next layer can recognize them.
 
@@ -346,7 +385,7 @@ We handle it with three layers of defense, shown in <FigRef id="retry-and-dedup"
 />
 
 1. **A send log.** Before calling a provider, the worker claims `(notification_id, channel)` with a conditional write. The row moves from absent to `attempting` to `sent`. A redelivered message whose row says `sent` is skipped. This catches every duplicate caused by *our* retries and crashes.
-2. **A provider-side collapse id.** For the duplicates we cannot see — the timed-out request that actually succeeded — we make the second copy harmless. APNs accepts an `apns-collapse-id` header, and notifications with the same collapse id replace each other on the device rather than stacking <Cite href="https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns" title="Sending notification requests to APNs" author="Apple" />. On Android, a notification `tag` does the same in the notification drawer. We set both to the `notification_id`.
+2. **A provider-side collapse id.** For the duplicates we cannot see — the timed-out request that actually succeeded — we make the second copy harmless. APNs accepts an `apns-collapse-id` header, and notifications with the same collapse id replace each other on the device rather than stacking <Cite href="https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns" title="Sending notification requests to APNs" author="Apple" />. On Android, the notification `tag` does the same in the notification drawer. We set both to the `notification_id`. (FCM also has a `collapse_key`, which looks like the same thing and is not; see the provider table in [Living with providers](#living-with-providers).)
 3. **A per-category policy for channels without a collapse mechanism.** Email and SMS have no equivalent: a duplicate email is a duplicate email. So each category declares what to do on an unknown outcome. A login code says `retry`; a second copy of a code is harmless, a missing one locks the user out. A marketing email says `do_not_retry`; one lost promotion is better than a duplicate that gets reported as spam.
 
 <Callout type="pitfall" title="Exactly-once is a trap here">
@@ -392,9 +431,25 @@ At 9:00 on a Monday, marketing launches a campaign to 50M users. At 9:01, a user
 
 Separate topics and pools give isolation in time: a backlog in `bulk` cannot delay a message in `high`. But all three lanes still share one provider quota, so the provider rate limiter divides it. `high` and `normal` get reserved shares; `bulk` gets whatever is left. When a burst of login codes arrives, the campaign slows down automatically. Netflix's RENO system uses the same idea, routing events into separate queues by priority with their own processing clusters <Cite href="https://www.infoq.com/news/2022/03/netflix-reno/" title="Netflix's RENO Keeps Experience Consistent across Devices" author="InfoQ" year="2022" />.
 
+**Lanes begin at the front door, not at the channel topics.** It is easy to draw the lanes after the processor and stop, which leaves a hole: campaign pages and login codes would still share the request topic and the processor pool, so a 50M-user expansion would delay every code behind it *before* either reached a lane. The split therefore starts at ingestion. The API routes each request to `requests-high` or `requests-normal` by its category's priority, campaign pages arrive on their own batch topic, and each stream has its own processor pool sized for its latency target. The channel lanes in <FigRef id="priority-lanes" /> are the second half of the same idea.
+
 The rate limiter is a token bucket per provider and lane (see [Rate limiting algorithms](/chapters/rate-limiting-algorithms)). With hundreds of workers, a central counter becomes a hot spot, so each worker leases a slice of the budget — "you may send 200 messages per second for the next 10 seconds" — and renews it. The limiter trades a little precision for not putting a network hop in front of every send.
 
-**Campaign fan-out.** A campaign is one request that becomes 50M notifications. We must not expand it into 50M messages in one transaction, and we must survive a crash halfway through without sending anyone two copies. <FigRef id="campaign-fanout" /> shows the flow.
+**Where the five seconds go.** The high lane's target is a p99 of 5 s from acceptance to provider handoff. The work itself takes well under a second; the budget exists to absorb queueing and one retry.
+
+| Stage                                              | Typical     | Budget at p99 |
+| -------------------------------------------------- | ----------- | ------------- |
+| API: authenticate, idempotency check, append       | 10–30 ms    | 100 ms        |
+| Wait in `requests-high`                            | ≈ 0         | 500 ms        |
+| Processor: cached lookups, rules, render           | 20–50 ms    | 300 ms        |
+| Wait in the channel's `high` lane                  | ≈ 0         | 500 ms        |
+| Worker: rate limiter, provider call                | 100 ms      | 2 s           |
+| Slack for one retry with backoff                   | 0           | 1.5 s         |
+| **Total**                                          | **≈ 200 ms** | **4.9 s**    |
+
+The lag alerts for the two waits fire at their budgets, which is long before the user-visible target is missed.
+
+**Campaign fan-out.** A campaign is one request that <Term id="fan-out">fans out</Term> into 50M notifications. We must not expand it into 50M messages in one transaction, and we must survive a crash halfway through without sending anyone two copies. <FigRef id="campaign-fanout" /> shows the flow.
 
 <Figure
   id="campaign-fanout"
@@ -421,9 +476,29 @@ At our 40k msg/s bulk budget, a 50M campaign takes about 21 minutes of send capa
 Segments are snapshotted when a fan-out job starts. A user who joins the segment ten minutes later is not included, and one who leaves is still sent to — unless they opted out, which the processor checks at send time regardless.
 </Aside>
 
+**Canary the campaign.** Before the fan-out runs at full speed, the scheduler releases the first page or two, a few thousand users, and pauses for a few minutes while the tracking service watches provider error rates, bounce and complaint rates, and the suppression rate. A broken deep link, a template with an unrendered `{{first_name}}`, or an audience that turns out to include opted-out users shows up in that sample at a cost of thousands of bad sends instead of millions. Marketing teams call this a seed or test send. We make it a mandatory stage of every bulk job rather than a courtesy.
+
 <Callout type="interview">
-When the interviewer asks "how do you send to 50M users?", the expected answer is not "a bigger queue". It is batching, checkpointing, deterministic ids for idempotency, and a priority lane so the campaign cannot starve transactional traffic.
+When the interviewer asks "how do you send to 50M users?", the expected answer is not "a bigger queue". It is batching, checkpointing, deterministic ids for idempotency, a canary, and a priority lane so the campaign cannot starve transactional traffic.
 </Callout>
+
+**Scheduling: the timer problem.** Three features release a notification at a future time: quiet hours, "send at 09:00 local", and digest windows. Delay topics suit the short, fixed waits that retries need, but "09:00 tomorrow" can be twenty hours away, and holding a message in a broker partition for twenty hours blocks everything behind it. Long waits need a store, not a queue. <FigRef id="scheduler" /> shows the design.
+
+<Figure
+  id="scheduler"
+  src="./figures/scheduler.svg"
+  alt="The notification processor and the campaign service write rows into a due-time table partitioned by minute. A sweeper job reads the current minute's partition, claims each row with a conditional update from pending to released, and publishes the notification to the priority lanes. Rows whose TTL has already passed are written to the suppression log as expired instead."
+  caption="The scheduler. Partitioning by due minute keeps every read small; the conditional claim makes a repeated sweep harmless."
+/>
+
+<Steps>
+1. The processor (for quiet hours and digests) or the campaign service (for local-time sends) writes the notification to a due-time table partitioned by the minute it becomes due: `(due_minute, notification_id)`.
+2. A sweeper job runs every few seconds. It reads the partition for the current minute and for any earlier minute it has not finished, oldest first.
+3. For each row it claims the release with a conditional update, `pending → released`, and then publishes the notification to its lane. A row it fails to claim was taken by another sweeper instance.
+4. The lane delivers as usual. Rows expire by TTL a day after their due time.
+</Steps>
+
+Partitioning by minute keeps each read small; at our scale a busy minute holds a few hundred thousand rows. It also lets several sweeper instances work on different minutes. The conditional claim makes a crashed or duplicated sweep harmless, the same trick as the send log. Two details matter in practice. Quiet hours are stored as local times and resolved to a due minute when the row is written, and a daylight-saving transition can make "local 09:00" happen twice or not at all, so the resolver always picks the first valid instant on or after the target. And when the sweeper falls behind, it processes due minutes oldest first, and a notification whose TTL has passed by the time it is released goes to `expired` rather than to a user who no longer needs it.
 
 ### Respecting the human [#respecting-the-human]
 
@@ -436,12 +511,12 @@ Every notification interrupts someone. Send too many and users disable notificat
   caption="The processor pipeline. Cheap checks that can drop a notification run first; expensive rendering runs last."
 />
 
-1. **Deduplicate.** Drop a notification whose `notification_id` was already processed, or whose `(user, collapse_key)` matches one sent in the last few minutes.
+1. **Deduplicate.** Drop a notification whose `notification_id` has already been processed (the duplicates our own retries produce), or whose content, meaning the same user, template, and parameters, matches one accepted in the last few minutes (the duplicates a producer bug produces).
 2. **Preferences and opt-outs.** Look up the user's matrix of category × channel. "Order updates: push yes, email yes, SMS no." Some categories, such as security alerts, cannot be disabled; preferences can only narrow their channels.
 3. **Quiet hours and send-at.** If it is 02:00 for the user, a social notification is handed to the scheduler to be released when quiet hours end — or dropped if its TTL will expire first. High-priority categories bypass quiet hours.
 4. **Frequency caps.** Per-user counters per category and window, such as "at most 3 marketing pushes per day". Counters live in an in-memory store with expiring keys. Over-cap notifications are suppressed, not delayed.
 5. **Aggregate.** Ten "someone liked your photo" events in five minutes should become one notification: "Priya and 9 others liked your photo." The processor holds aggregatable notifications in a short window keyed by `(user, aggregation_key)` and emits a digest when the window closes. This trades a few minutes of latency for far fewer interruptions.
-6. **Select channels.** Among the channels the user allows, pick the cheapest one that will work: in-app if the app is open, push if the user has a valid device token, email otherwise, and SMS only for categories that require it.
+6. **Select channels.** Among the channels the user allows, pick the cheapest one that will work: in-app if the app is open, push if the user has a valid device token, email otherwise, and SMS only for categories that require it. Push goes to every active device, so a user with a phone and a tablet sees both; reading on one sends a silent push carrying the `notification_id` that clears the other.
 7. **Render.** Fill the localized template with the user's data, enforce size limits (an APNs payload is limited to 4 KB), and escape all user data in HTML email.
 
 Frequency caps are the stage most often built wrong, usually by counting with a read followed by a separate write, which lets two concurrent notifications both see "2 of 3" and both send. The counter must be a single atomic operation:
@@ -457,11 +532,11 @@ export async function withinCap(n: Notification, limit: number): Promise<boolean
 }
 ```
 
-Because all of one user's notifications are processed on the same partition, these counters can also live in the processor's local state, avoiding a network call entirely; the remote version above is the simpler starting point. Note that a notification counts against the cap when it is *decided*, not when it is delivered. A notification that later fails at the provider has still used a slot, which errs on the side of sending less.
+With a single stream per user, these counters could live in the processor's local state and avoid the network call. Our priority lanes split a user's traffic across streams, so the counter lives in the shared store above, which is also the simpler place to start. Note that a notification counts against the cap when it is *decided*, not when it is delivered. A notification that later fails at the provider has still used a slot, which errs on the side of sending less.
 
 Every suppression is recorded with its reason. When a producer asks "why didn't my user get this?", the answer should be one query away: "suppressed: frequency cap, marketing push, 3 of 3 used today."
 
-LinkedIn's Air Traffic Controller is a public example of this design: a single gateway that decides channel, timing, aggregation, and filtering for every member notification, built as a stream processor partitioned by member id with local state <Cite href="https://www.linkedin.com/blog/engineering/messaging-notifications/air-traffic-controller-member-first-notifications-at-linkedin" title="Air Traffic Controller: Member-first notifications at LinkedIn" author="Changji Shi, Adriel Fuad" year="2018" />. Partitioning by user is what makes the caps and aggregation windows cheap: all of one user's notifications arrive at the same processor instance, so its counters can be local.
+LinkedIn's Air Traffic Controller is a public example of this design: a single gateway that decides channel, timing, aggregation, and filtering for every member notification, built as a stream processor partitioned by member id with local state <Cite href="https://www.linkedin.com/blog/engineering/messaging-notifications/air-traffic-controller-member-first-notifications-at-linkedin" title="Air Traffic Controller: Member-first notifications at LinkedIn" author="Changji Shi, Adriel Fuad" year="2018" />. Partitioning by user is what makes aggregation cheap: within a lane, all of one user's notifications arrive at the same processor instance, so the digest window is local state rather than a distributed one.
 
 **When the preference service is down.** The processor cannot check opt-outs. Should it send anyway? The answer depends on the category, and the asymmetry is the point:
 
@@ -485,6 +560,18 @@ APNs, FCM, the email provider, and the SMS provider are the least reliable, leas
 
 **Rate limits are someone else's numbers.** The adapter's limiter is configured from the provider's published quotas, not from our wishes. For FCM that means the project-wide per-minute quota (and a per-device limit: on Android, a burst of up to 240 messages per minute and 5,000 per hour to one device) <Cite href="https://firebase.google.com/docs/cloud-messaging/throttling-and-quotas" title="FCM throttling and quotas" author="Firebase" />. For SMS it means per-sender throughput. When a provider returns `429`, the adapter tightens its own budget rather than retrying harder.
 
+**Speak each provider's dialect.** Our request fields map onto provider features that look alike and behave differently:
+
+| Our field              | APNs (iOS)                                                     | FCM (Android)                                            |
+| ---------------------- | -------------------------------------------------------------- | -------------------------------------------------------- |
+| `priority`             | `apns-priority` header: 10 (immediate) or 5 (power-conserving) | `android.priority`: `high` or `normal`                   |
+| `ttl_seconds`          | `apns-expiration`: an absolute time; 0 means do not store      | `android.ttl`: a duration, up to the 4-week default      |
+| Replace on the device  | `apns-collapse-id`                                             | `android.notification.tag` replaces the drawer entry     |
+| Replace while offline  | the same `apns-collapse-id`                                    | `android.collapse_key`; a device keeps at most 4 keys    |
+| Payload limit          | 4 KB                                                           | 4 KB                                                     |
+
+The Android column hides a trap for the dedup scheme in [reliable delivery](#reliable-delivery). FCM stores at most four distinct `collapse_key` values per device while it is offline, so a unique key per notification would make an offline phone silently keep only the four newest and drop the rest <Cite href="https://firebase.google.com/docs/cloud-messaging/customize-messages/collapsible-message-types" title="Non-collapsible and collapsible messages" author="Firebase" />. We therefore set `collapse_key` only to the producer's own `collapse_key`, where "shipped" and "delivered" should fold into one, and rely on the notification `tag` for duplicate suppression in the drawer. The TTL mapping has its own subtlety: FCM's default lifespan is four weeks <Cite href="https://firebase.google.com/docs/cloud-messaging/concept-options" title="About FCM messages" author="Firebase" />, so a worker that forgets to set `android.ttl` turns a ten-minute "driver arriving" alert into something that can land a month later.
+
 **Circuit breakers and bulkheads.** Recall the concurrency estimate: a provider slowing from 100 ms to 1 s needs ten times the in-flight requests. Without protection, workers pile up waiting on the sick provider. Each adapter therefore has its own connection pool (a bulkhead) and a <Term id="circuit-breaker">circuit breaker</Term>: after a threshold of failures or timeouts it opens, fails new calls immediately for a cool-down period, then lets a few trial requests through <Cite href="https://martinfowler.com/bliki/CircuitBreaker.html" title="CircuitBreaker" author="Martin Fowler" />. Failing fast keeps workers free and turns a provider brownout into a clean, visible backlog.
 
 **Failover where it exists.** Email and SMS are commodities: we can contract two providers and fail over when the breaker opens. Push is not. There is exactly one way to reach an iPhone's notification center, and it is APNs. When APNs is down, we queue (within each notification's TTL) and deliver the important updates through the in-app inbox when users open the app. Netflix's RENO combines best-effort pushes to online devices with periodic pulls by the app for this reason <Cite href="https://www.infoq.com/news/2022/03/netflix-reno/" title="Netflix's RENO Keeps Experience Consistent across Devices" author="InfoQ" year="2022" />.
@@ -493,12 +580,28 @@ APNs, FCM, the email provider, and the SMS provider are the least reliable, leas
 
 **Webhooks are a distributed system too.** Provider callbacks are themselves delivered at least once and in no particular order: a "delivered" event can arrive before our own worker has recorded "sent", and the same "bounced" event can arrive three times. The tracking service therefore treats status as a one-way state machine (<FigRef id="notification-lifecycle" />). It applies an event only if it moves the delivery forward, so a late "sent" never overwrites "delivered", and a repeated event changes nothing. Webhook endpoints verify each provider's signature, acknowledge quickly, and push events onto a topic for processing, because a provider that sees slow responses from us will retry and make the backlog worse.
 
+**What "delivered" means depends on the channel.** Every channel reports something different, and a status API that hides the difference lies to its callers:
+
+| Channel     | What the provider confirms                                       | What it cannot tell you                                                        |
+| ----------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Push (APNs) | It accepted the request for a valid token                        | Whether the device received or showed it; there is no per-message receipt      |
+| Push (FCM)  | It accepted the request; aggregate delivery statistics exist     | Per-message receipt on the device                                              |
+| Email       | The receiving mail server accepted it; bounces and complaints later | Inbox or spam folder; opens rely on tracking pixels that mail clients increasingly block |
+| SMS         | A carrier delivery receipt, where the destination network provides one | Whether anyone read it                                                   |
+| In-app      | Exact: we wrote the row and we store `read_at`                   | Nothing; this is the only channel we fully observe                             |
+
+So `delivered` in our status store means different things per channel, and the status API says which. For push, the only reliable sign that a notification reached a person is the app's own telemetry: the SDK reports "notification opened" with the `notification_id`, and the tracking service joins it to the delivery. That receipt exists only if the client team instruments it, which is a conversation to have before launch, not after.
+
 **Email deliverability is a reputation system.** Mailbox providers judge every sender. Gmail requires senders of marketing and subscribed messages to support one-click unsubscribe, and asks bulk senders to keep their user-reported spam rate below 0.30%, recommending below 0.10% <Cite href="https://support.google.com/a/answer/81126" title="Email sender guidelines" author="Google" />. One-click unsubscribe is standardized by the `List-Unsubscribe` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click` headers <Cite href="https://www.rfc-editor.org/rfc/rfc8058" title="RFC 8058: Signaling One-Click Functionality for List Email Headers" author="J. Levine, T. Herkula" year="2017" />. Email providers watch the same signals: Amazon SES places an account under review when its bounce rate reaches 5% and may pause sending at 10% <Cite href="https://docs.aws.amazon.com/ses/latest/dg/reputationdashboardmessages.html" title="Reputation metrics messages" author="Amazon Web Services" />.
 
 For our design, that means three concrete mechanisms:
 - Bounce and complaint webhooks flow into the tracking service, which immediately suppresses the address for future sends.
 - The unsubscribe endpoint writes straight to preferences, and the processor honors it on the next message.
 - Transactional and marketing email go out from separate sending domains or IP pools, so a bad campaign cannot hurt password resets.
+- Every sending domain has SPF, DKIM, and DMARC configured; Gmail requires all three of bulk senders, and unauthenticated mail is the fastest route to the spam folder <Cite href="https://support.google.com/a/answer/81126" title="Email sender guidelines" author="Google" />.
+- Hard bounces (the address does not exist) suppress the address permanently. Soft bounces (mailbox full, server busy) retry with backoff like any other transient failure.
+
+**SMS has its own rules.** A reply of STOP must stop messages; providers enforce this at their edge and send us an inbound webhook, which writes to preferences the same way the email unsubscribe does. Length is money: a segment holds 160 characters in the GSM-7 alphabet and 70 in UCS-2, so a single emoji can double the cost of a login code. SMS templates are linted for segment count before they can be published, and the cost table in [Back-of-the-envelope estimation](#back-of-the-envelope-estimation) is the reason.
 
 <Callout type="warning">
 Deliverability problems are invisible to your own success metrics. The provider accepted the email, and it still went to spam. Track complaint and bounce rates per sending domain as first-class service-level indicators.
@@ -512,6 +615,8 @@ Start from the peak of 58k msg/s and ask what breaks first.
 - **Request topic.** Assume one processor instance handles about 1k notifications per second including lookups. That is about 60 instances at peak; we provision 128 partitions so we can double consumers without repartitioning.
 - **Lookups.** 58k preference reads and 58k device reads per second. Both are served from cache; at a 95% hit rate the databases see about 2.9k reads per second each.
 - **Status writes.** 232k writes per second is the largest load in the system. We write only state transitions, batch them per partition, and let the wide-column store absorb them.
+- **Broker throughput.** At about 1 KB per message, 58k msg/s is roughly 58 MB/s into the request topic and about the same again across the channel topics, well within a modest broker cluster. The broker is not the bottleneck; the services behind it and the providers beyond them are.
+- **Hot users.** A viral post can generate millions of "liked your photo" events for one account in minutes, all landing on one partition. Aggregation collapses them into a handful of digests and the per-user cap bounds the rest, so the partition spends its time counting rather than sending. A cap on raw events per user per minute at the API protects the partition from the counting too.
 - **FCM quota.** The 1.04M per-minute Android peak needs a quota increase that must be requested and grown in advance. Until then, the bulk lane absorbs the shortfall by slowing down.
 
 <Callout type="interview" title="What breaks first?">
@@ -540,6 +645,10 @@ When asked how the design scales, do not say "add more servers". Name the first 
 | Preference service            | Unavailable                              | Lookup errors                           | Marketing fails closed; transactional fails open with cached preferences   |
 | A producer                    | Runaway loop sends millions of requests  | Per-producer rate and anomaly alerts    | Per-producer quotas at the API; per-user caps in the processor             |
 | Device registry               | Dead tokens accumulate                   | Rising `410` and `UNREGISTERED` rates   | Delete on response; prune stale tokens by `last_seen`                       |
+| One user (hot partition)      | Millions of events for one account       | Lag skew across partitions              | Aggregation and caps; per-user event cap at the API                        |
+| Scheduler                     | Sweeper crashes or falls behind          | Age of the oldest unprocessed due minute | Oldest-first sweeps; conditional claims; past-TTL rows go to `expired`     |
+| Tracking service              | Webhook flood during a provider incident | Webhook topic lag                       | Acknowledge fast, process from a topic; status is monotonic, so order does not matter |
+| Any stage                     | Duplicate delivery                       | Send-log skip rate                      | Dedup by id in the processor, send log at the worker, collapse on the device |
 | Region                        | Region loss                              | Health checks                           | Users fail over to a secondary region; ingestion fails over first           |
 
 The runaway producer deserves a special mention because it is the incident almost every notification team has: a bug in someone else's service sends the same notification in a loop. The idempotency key does not help if the bug generates a new key each time. Per-producer quotas at the API, per-user caps in the processor, and a large red "pause this category" switch for on-call engineers are what stop a bug from reaching millions of phones.
@@ -560,6 +669,7 @@ We measure the system the way users experience it: per priority lane, per channe
 - **DLQ growth rate**, with an owner.
 - **Email complaint and bounce rates** per sending domain, alerting well before provider thresholds.
 - **SMS spend per day**, because a bug in SMS routing is the most expensive bug in the system.
+- **The delivery funnel** per channel and category: accepted → queued or suppressed → sent → delivered → opened. The ratios are the health metrics. A falling sent-to-accepted ratio means a provider or quota problem; a falling opened-to-sent ratio means a relevance or content problem. Opens come from the app SDK for push and in-app, from carrier receipts for SMS, and from tracking pixels for email, which mail clients increasingly block, so email open rates are a trend to watch rather than a number to trust.
 
 **Tracing.** The `notification_id` is the correlation id from the producer's request through every topic, worker, and provider call. We also log the provider's own message id (for APNs, the `apns-id` response header) so a single notification can be traced with the provider's support team.
 
@@ -588,7 +698,19 @@ We measure the system the way users experience it: per priority lane, per channe
 | Preference outage           | Fail closed for marketing, open for transactional | One policy for all          | The cost of a wrong send and of a missed send differ by category                        |
 | Provider redundancy         | Secondary providers for email and SMS     | Single provider per channel         | Commodity channels make failover cheap; push has no alternative                         |
 | Aggregation                 | Short hold window for digests             | Send every event immediately        | Fewer interruptions and lower cost for a few minutes of latency                         |
+| Long delays                 | Due-time table swept by a job             | Delay topics for everything         | An hours-long hold in a partition blocks everything behind it                            |
+| Inbox                       | A view over the notifications table       | A separate inbox table              | One write path; the read pattern is the one the table already serves                    |
+| Android collapse            | `tag` for the drawer, producer key for `collapse_key` | Unique `collapse_key` per notification | FCM keeps only four collapse keys per offline device                       |
 </Tradeoffs>
+
+### Questions an interviewer will ask next
+
+- **"Why not WebSockets instead of push?"** A socket only reaches an app that is open. Push wakes a closed app through the platform's own channel, which is why both exist: the live connection is the in-app channel, push is for everything else, and the inbox is what they both read from.
+- **"What happens if the broker is down?"** The API returns `503` and nothing is lost, because producers hold their requests in their outbox and retry. The design refuses rather than lies. A team that cannot accept that for login codes adds an emergency direct path for the high lane only, and accepts that it bypasses every rule in the processor.
+- **"How would you test a change to the frequency-cap rules?"** Shadow mode: run the new rules beside the old on live traffic, log both decisions, send only the old. Then replay a day of the request topic through the new rules and diff the suppression log.
+- **"How would you add a new channel, such as WhatsApp?"** A new channel topic, worker, and provider adapter, plus one new row in the channel-selection matrix. Nothing upstream changes, which is the test of whether the channel abstraction is real.
+- **"What about a user with three devices?"** Push to every active device, and let a read on one clear the others with a silent push. The device registry's `last_seen` keeps "active" honest.
+- **"Can you guarantee exactly-once?"** No, and neither can anyone whose side effect is an HTTP call to Apple. At-least-once with deduplication at every layer is the honest answer; see [reliable delivery](#reliable-delivery).
 
 ## Evolution
 
@@ -623,10 +745,11 @@ Nobody builds the final design first. Here is how we would get there.
 | 50M-user campaigns                  | Paged fan-out, checkpoints, deterministic ids, bulk lane                             |
 | Respect users                       | Preferences, quiet hours, frequency caps, digests, one-click unsubscribe             |
 | Survive providers                   | Rate limits from real quotas, circuit breakers, failover, token hygiene              |
+| Control cost                        | Prefer push and in-app; SMS only where a category requires it; spend alerts          |
 
 - Accept fast and durably; deliver asynchronously.
 - Assume at-least-once everywhere and make duplicates detectable or harmless.
 - Isolate by priority and by channel so one backlog cannot block another.
 - Put policy in one place — the processor — and make suppression explainable.
-- Design around provider limits, because they are the real ceiling of the system.
+- Design around provider limits and prices, because they are the real ceiling and the real bill.
 - Start with a relational table as a queue; earn the broker, the lanes, and the regions.

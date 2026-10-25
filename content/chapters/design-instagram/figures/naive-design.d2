@@ -1,0 +1,13 @@
+...@../../../_shared/d2/base
+
+direction: down
+
+app: Mobile app {class: client}
+web: "Web application\n(resizes media in the request)" {class: service}
+disk: Local disk {class: blob}
+db: "PostgreSQL\n(users, posts, follows, likes)" {class: datastore}
+
+app -> web: "upload, feed, likes"
+web -> disk: "save files"
+web -> db: "feed: JOIN follows and posts"
+web -> app: "download every photo and video" {class: failure}

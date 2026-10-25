@@ -1,0 +1,30 @@
+...@../../../_shared/d2/base
+
+grid-columns: 2
+grid-rows: 5
+vertical-gap: 110
+horizontal-gap: 230
+
+created: created {class: state}
+expired: expired {class: state}
+ready: ready {class: state}
+attached: attached {class: state}
+deleted: deleted {class: state}
+uploading: uploading {class: state}
+uploaded: uploaded {class: state}
+processing: processing {class: state}
+rejected: rejected {class: state}
+purged: purged {class: state}
+
+created -> uploading: "first chunk"
+uploading -> uploaded: "checksum OK"
+uploaded -> processing: "taken"
+processing -> ready: "renditions written"
+processing -> rejected: "invalid file, abuse match" {class: failure}
+created -> expired: "24 h"
+uploading -> expired: "24 h"
+uploaded -> expired: "24 h"
+ready -> expired: "24 h"
+ready -> attached: "post published" {class: focus}
+attached -> deleted: "post deleted"
+deleted -> purged: "after 30 days"

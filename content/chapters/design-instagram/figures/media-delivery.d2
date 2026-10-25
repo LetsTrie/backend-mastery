@@ -1,0 +1,26 @@
+...@../../../_shared/d2/base
+
+grid-rows: 3
+grid-columns: 2
+horizontal-gap: 160
+vertical-gap: 100
+
+feed: Feed service {class: service}
+app: "Mobile app\n(device cache)" {class: client}
+shield: Origin shield {class: cache}
+edge: "CDN edge\n(checks signature)" {class: external}
+origin: Media origin {class: service}
+
+storage: Object storage {
+  class: boundary
+  direction: right
+  hot: "Hot tier\n(3 copies)" {class: blob}
+  warm: "Warm tier\n(erasure-coded)" {class: blob}
+  hot -> warm: "tiering job,\nafter 30 days"
+}
+
+feed -> app: "signed URLs"
+app -> edge: "① miss" {class: focus}
+edge -> shield: "② miss"
+shield -> origin: "③ miss"
+origin -> storage: "④ read: hot if recent, else warm"

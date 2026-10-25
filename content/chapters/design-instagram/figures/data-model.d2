@@ -1,0 +1,46 @@
+...@../../../_shared/d2/base
+
+direction: right
+
+users: {
+  shape: sql_table
+  user_id: bigint {constraint: primary_key}
+  username: text
+  is_private: boolean
+  created_at: timestamptz
+}
+posts: {
+  shape: sql_table
+  post_id: bigint {constraint: primary_key}
+  author_id: bigint {constraint: foreign_key}
+  caption: text
+  state: text
+  created_at: timestamptz
+}
+post_media: {
+  shape: sql_table
+  post_id: bigint {constraint: [primary_key; foreign_key]}
+  position: smallint {constraint: primary_key}
+  media_id: bigint {constraint: foreign_key}
+}
+media: {
+  shape: sql_table
+  media_id: bigint {constraint: primary_key}
+  owner_id: bigint {constraint: foreign_key}
+  kind: text
+  state: text
+  storage_key: text
+}
+following: {
+  shape: sql_table
+  follower_id: bigint {constraint: [primary_key; foreign_key]}
+  followee_id: bigint {constraint: [primary_key; foreign_key]}
+  state: text
+}
+
+posts.author_id <-> users.user_id: {class: reference}
+media.owner_id <-> users.user_id: {class: reference}
+following.follower_id <-> users.user_id: {class: reference}
+following.followee_id <-> users.user_id: {class: reference}
+post_media.post_id <-> posts.post_id: {class: reference}
+post_media.media_id <-> media.media_id: {class: reference}

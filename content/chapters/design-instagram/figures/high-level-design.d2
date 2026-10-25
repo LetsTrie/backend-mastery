@@ -1,0 +1,41 @@
+...@../../../_shared/d2/base
+
+direction: down
+
+app: Mobile app {class: client}
+
+cdn: CDN {class: external}
+upload: Upload service {class: service}
+gw: API gateway {class: gateway}
+feed: Feed service {class: service}
+
+blob: Object storage {class: blob}
+mq: Media queue {class: queue}
+post: Post service {class: service}
+rank: Ranking service {class: service}
+
+proc: Media processors {class: service}
+meta: "Metadata store\n(sharded PostgreSQL)" {class: datastore}
+events: Post events {class: queue}
+fanout: Fan-out service {class: service}
+feedstore: Feed store {class: datastore}
+
+app -> upload: "① upload chunks"
+upload -> blob: "② store original"
+upload -> mq: "③ media.uploaded" {class: async}
+mq -> proc: {class: async}
+proc -> blob: "④ write renditions"
+proc -> post: "media ready"
+app -> gw: "⑤ POST /v1/posts"
+gw -> post
+post -> meta: "write post"
+post -> events: "⑥ post.published" {class: async}
+events -> fanout: {class: async}
+fanout -> meta: "read followers"
+fanout -> feedstore: "⑦ write to followers' feeds"
+app -> feed: "⑧ GET /v1/feed"
+feed -> feedstore: "read list"
+feed -> rank: "rank"
+feed -> meta: "hydrate"
+app -> cdn: "⑨ fetch renditions" {class: focus}
+cdn -> blob: "on a miss" {class: focus}

@@ -1,0 +1,55 @@
+...@../../../_shared/d2/base
+
+direction: right
+
+likes_by_post: {
+  shape: sql_table
+  post_id: bigint {constraint: [primary_key; foreign_key]}
+  bucket: smallint {constraint: primary_key}
+  user_id: bigint {constraint: [primary_key; foreign_key]}
+  created_at: timestamp
+}
+likes_by_user: {
+  shape: sql_table
+  user_id: bigint {constraint: [primary_key; foreign_key]}
+  post_id: bigint {constraint: [primary_key; foreign_key]}
+  created_at: timestamp
+}
+comments_by_post: {
+  shape: sql_table
+  post_id: bigint {constraint: [primary_key; foreign_key]}
+  comment_id: bigint {constraint: primary_key}
+  author_id: bigint {constraint: foreign_key}
+  text: text
+}
+feed_by_user: {
+  shape: sql_table
+  user_id: bigint {constraint: [primary_key; foreign_key]}
+  post_id: bigint {constraint: [primary_key; foreign_key]}
+  author_id: bigint
+}
+post_counters: {
+  shape: sql_table
+  post_id: bigint {constraint: [primary_key; foreign_key]}
+  like_count: bigint
+  comment_count: bigint
+}
+
+posts: {
+  shape: sql_table
+  post_id: bigint {constraint: primary_key}
+}
+users: {
+  shape: sql_table
+  user_id: bigint {constraint: primary_key}
+}
+
+likes_by_post.post_id <-> posts.post_id: {class: reference}
+likes_by_post.user_id <-> users.user_id: {class: reference}
+likes_by_user.post_id <-> posts.post_id: {class: reference}
+likes_by_user.user_id <-> users.user_id: {class: reference}
+comments_by_post.post_id <-> posts.post_id: {class: reference}
+comments_by_post.author_id <-> users.user_id: {class: reference}
+feed_by_user.post_id <-> posts.post_id: {class: reference}
+feed_by_user.user_id <-> users.user_id: {class: reference}
+post_counters.post_id <-> posts.post_id: {class: reference}

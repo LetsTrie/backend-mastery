@@ -1,0 +1,23 @@
+...@../../../_shared/d2/base
+
+direction: down
+
+app: Mobile app {class: client}
+like: Like service {class: service}
+rows: "likes_by_post,\nlikes_by_user" {class: datastore}
+events: "Like events\n(by post_id)" {class: queue}
+agg: Counter aggregator {class: service}
+counters: post_counters {class: datastore}
+cache: "Counter cache\n(leases)" {class: cache}
+feed: Feed service {class: service}
+recon: Reconciliation job {class: job}
+
+app -> like: "① PUT"
+like -> rows: "② check, ③ write rows"
+like -> events: "④ ±1" {class: async}
+events -> agg: {class: async}
+agg -> counters: "⑤ total, once per post per second" {class: focus}
+counters -> cache: "refill"
+feed -> cache: "⑥ read"
+recon -> rows: "⑦ recount"
+recon -> counters: "fix drift"

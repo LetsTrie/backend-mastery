@@ -1,0 +1,19 @@
+...@../../../_shared/d2/base
+
+shape: sequence_diagram
+
+celeb: "Celebrity's app" {class: client}
+post: Post service {class: service}
+fanout: Fan-out service {class: service}
+hosts: Feed service hosts {class: service}
+fans: "Followers' apps" {class: client}
+likes: "Like service and\ncounter aggregator" {class: service}
+
+celeb -> post: "① publish"
+post -> fanout: "post.published" {class: async}
+fanout -> fanout: "② over threshold:\nno push" {class: focus}
+post -> hosts: "③ append\n(post events)" {class: async}
+fans -> hosts: "④ feed requests"
+hosts -> fans: "⑤ merged, ranked"
+fans -> likes: "⑥ 1,700 likes/s"
+likes -> likes: "⑦ 1 counter write/s"

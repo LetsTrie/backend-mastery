@@ -1,0 +1,27 @@
+...@../../../_shared/d2/base
+
+shape: sequence_diagram
+
+app: Mobile app {class: client}
+upload: Upload service {class: service}
+blob: Object storage {class: blob}
+mq: Media queue {class: queue}
+proc: Media processor {class: service}
+post: Post service {class: service}
+
+app -> upload: "① POST /v1/uploads"
+upload -> app: "upload_url"
+app -> upload: "② PATCH chunks"
+app -> upload: "connection lost" {class: failure}
+app -> upload: "③ HEAD"
+upload -> app: "offset: 9.4 MB"
+app -> upload: "④ PATCH the rest"
+upload -> blob: "⑤ store, 3 zones"
+upload -> app: "acknowledged"
+upload -> mq: "⑥ media.uploaded" {class: async}
+app -> post: "⑦ POST /v1/posts"
+post -> app: "201, processing"
+mq -> proc: "⑧ take event" {class: async}
+proc -> blob: "renditions"
+proc -> post: "⑨ media ready" {class: focus}
+post -> post: "publish"

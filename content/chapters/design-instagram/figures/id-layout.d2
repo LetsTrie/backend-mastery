@@ -1,0 +1,24 @@
+...@../../../_shared/d2/base
+
+grid-rows: 2
+grid-gap: 80
+
+id: "64-bit id" {
+  class: boundary
+  grid-columns: 3
+  grid-gap: 0
+  time: "41 bits: time\nms since our epoch" {class: service}
+  shard: "13 bits: shard\n0 – 8,191" {class: focus}
+  seq: "10 bits: seq\n0 – 1,023" {class: service}
+}
+
+map: "Logical shard → server" {
+  class: boundary
+  grid-columns: 3
+  grid-gap: 40
+  db1: "Server 1\nshards 0 – 255" {class: datastore}
+  db2: "Server 2\nshards 256 – 511" {class: datastore}
+  dbn: "…\n32 servers on day one" {class: datastore}
+}
+
+id.shard -> map: "(id >> 10) & 8191"

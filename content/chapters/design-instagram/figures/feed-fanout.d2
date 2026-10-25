@@ -1,0 +1,26 @@
+...@../../../_shared/d2/base
+
+direction: down
+
+post: Post service {class: service}
+events: Post events {class: queue}
+fanout: Fan-out service {class: service}
+graph: "Followers\n(metadata store)" {class: datastore}
+active: "Last-active times" {class: cache}
+feedstore: "Feed store\n(feed lists)" {class: datastore}
+
+hosts: Every feed service host {
+  class: boundary
+  direction: down
+  lists: "In-memory recent posts\nof large accounts" {class: cache}
+  feed: Feed service {class: service}
+  feed -> lists: "pull: merge"
+}
+
+post -> events: "post.published" {class: async}
+events -> fanout: {class: async}
+fanout -> graph: "< 100k followers:\npage through followers"
+fanout -> active: "keep the active\n(last 14 days)"
+fanout -> feedstore: "push: append post id" {class: focus}
+events -> hosts.lists: "≥ 100k followers:\nappend to author's list" {class: async}
+hosts.feed -> feedstore: "read own feed list"

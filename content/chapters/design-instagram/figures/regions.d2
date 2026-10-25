@@ -1,0 +1,37 @@
+...@../../../_shared/d2/base
+
+grid-columns: 2
+grid-gap: 80
+
+a: "Region A" {
+  class: boundary
+  direction: down
+  events: Post events {class: queue}
+  svc: Services {class: service}
+  meta: "Metadata primary\n(shard group 1)" {class: datastore}
+  cache: Cache {class: cache}
+  feeds: "Feed store\n(users homed in A)" {class: datastore}
+  events -> svc: "fan out" {class: async}
+  svc -> meta: "writes"
+  svc -> cache
+  svc -> feeds
+}
+
+b: "Region B" {
+  class: boundary
+  direction: down
+  events: Post events {class: queue}
+  svc: Services {class: service}
+  meta: "Read replica\n(shard group 1)" {class: datastore}
+  cache: Cache {class: cache}
+  feeds: "Feed store\n(users homed in B)" {class: datastore}
+  events -> svc: "fan out" {class: async}
+  svc -> meta: "reads"
+  svc -> cache
+  svc -> feeds
+  meta -> cache: "invalidate" {class: focus}
+}
+
+a.events -> b.events: "replicate" {class: async}
+a.meta -> b.meta: "replicate" {class: async}
+b.svc -> a.meta: "writes"

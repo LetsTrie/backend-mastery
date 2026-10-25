@@ -1,0 +1,20 @@
+...@../../../_shared/d2/base
+
+shape: sequence_diagram
+
+app: Mobile app {class: client}
+feed: Feed service {class: service}
+store: Feed store {class: datastore}
+rank: Ranking service {class: service}
+cache: Feed cache {class: cache}
+meta: "Posts, counts,\nlikes" {class: datastore}
+
+app -> feed: "① GET /v1/feed"
+feed -> store: "② feed list (via cache)"
+feed -> feed: "③ merge large accounts"
+feed -> feed: "④ filter"
+feed -> rank: "⑤ rank candidates" {class: focus}
+rank -> feed: "ordered ids"
+feed -> cache: "⑥ save snapshot"
+feed -> meta: "⑦ hydrate 20 posts"
+feed -> app: "⑧ page + cursor"

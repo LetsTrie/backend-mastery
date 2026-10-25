@@ -1,0 +1,19 @@
+...@../../../_shared/d2/base
+
+shape: sequence_diagram
+
+a: Laptop A {class: client}
+meta: Metadata service {class: service}
+sync: Sync service {class: service}
+b: "Phone B (cursor 18233)" {class: client}
+blocks: Block service {class: service}
+
+a -> meta: "① commit rev_42"
+meta -> meta: "② journal 18235"
+meta -> sync: "③ ns_8812 at 18235" {class: async}
+sync -> b: "④ hint" {class: async}
+b -> meta: "⑤ changes after 18233" {class: focus}
+meta -> b: "18234, 18235"
+b -> blocks: "⑥ fetch missing blocks"
+b -> b: "⑦ apply, cursor = 18235"
+sync -> b: "lost hint: periodic pull" {class: failure}

@@ -1,0 +1,17 @@
+...@../../../_shared/d2/base
+
+shape: sequence_diagram
+
+a: "Laptop A (offline)" {class: client}
+meta: Metadata service {class: service}
+b: Laptop B {class: client}
+
+a -> a: "edit, base rev_41"
+b -> b: "edit, base rev_41"
+b -> meta: "① commit, base rev_41"
+meta -> b: "201: head is rev_42"
+a -> meta: "② online: commit, base rev_41"
+meta -> a: "409 Conflict: head is rev_42" {class: failure}
+a -> meta: "③ fetch rev_42 into the original path"
+a -> meta: "④ upload own edit as a conflicted copy" {class: focus}
+meta -> a: "201: both edits kept"

@@ -1,0 +1,49 @@
+...@../../../_shared/d2/base
+
+direction: right
+
+files: {
+  shape: sql_table
+  namespace_id: text {constraint: primary_key}
+  file_id: text {constraint: primary_key}
+  parent_id: text {constraint: foreign_key}
+  name: text
+  is_folder: bool
+  head_revision: text
+  trashed_at: timestamp
+}
+
+revisions: {
+  shape: sql_table
+  file_id: text {constraint: [primary_key; foreign_key]}
+  revision_id: text {constraint: primary_key}
+  size: bigint
+  blocklist: "bytes[]"
+  manifest_hash: bytes {constraint: foreign_key}
+  consistency_token: bytes
+  created_at: timestamp
+}
+
+journal: {
+  shape: sql_table
+  namespace_id: text {constraint: primary_key}
+  seq: bigint {constraint: primary_key}
+  file_id: text {constraint: foreign_key}
+  op: text
+  revision_id: text
+}
+
+blocks: {
+  shape: sql_table
+  dedup_scope: text {constraint: primary_key}
+  hash: bytes {constraint: primary_key}
+  volume_id: bigint
+  offset: bigint
+  size: int
+  state: text
+}
+
+files.parent_id <-> files.file_id: {class: reference}
+revisions.file_id <-> files.file_id: {class: reference}
+journal.file_id <-> files.file_id: {class: reference}
+revisions.manifest_hash <-> blocks.hash: {class: reference}

@@ -35,6 +35,7 @@ parts:
     description: End-to-end designs of real-world systems, from requirements to failure modes.
     chapters:
       - design-a-notification-service
+      - design-google-drive
     planned:
       - design-a-rate-limiter
       - design-a-url-shortener

@@ -1,0 +1,623 @@
+---
+slug: design-google-drive
+kind: case-study
+title: Design Google Drive
+subtitle: "How to store, sync, and share billions of files across every device without losing a byte"
+description: >-
+  Design a Google Drive-like service that stores, syncs, and shares files: chunked
+  uploads, delta sync, conflicts, permissions, and exabyte storage.
+part: case-studies
+tags: [system-design, distributed-systems, file-storage, file-sync, access-control]
+prerequisites: [sharding-and-partitioning, replication, consistency-models, idempotency]
+status: review
+authors: [md-sakib-khan]
+reviewers: []
+updated: 2026-10-25
+references:
+  - title: "Designing Data-Intensive Applications"
+    authors: "Martin Kleppmann"
+    year: 2017
+    url: https://dataintensive.net/
+revisions: []
+---
+
+You edit a 300 MB slide deck on a plane. At the same time, a colleague edits the same deck at their desk. You land, your laptop finds Wi-Fi, and three things have to happen at once. Only the slides you changed should go up, not 300 MB over airport Wi-Fi. Your colleague's edits must not be silently overwritten by yours, or yours by theirs. And the contractor you removed from the project folder yesterday must not be able to open either version.
+
+That scene is this whole chapter. A file storage and sync service looks like "a web page in front of a disk", and the first version can be exactly that. At a billion users it becomes four hard problems stacked on top of each other: moving bytes efficiently over unreliable networks, keeping hundreds of millions of devices in agreement, deciding who may see what at millions of checks per second, and storing exabytes cheaply enough to afford and durably enough that an acknowledged file is never lost.
+
+We design a service like Google Drive: upload, download, folders, sync clients for desktop and phone, version history, trash, and sharing. Where Google, Dropbox, or Meta have published how their systems work, we cite them; everything else is our design and our reasoning.
+
+## Problem and scope
+
+People keep files in the service and expect to reach them from every device they own, and to share them with anyone. The clients are a desktop app that mirrors a folder on disk, mobile apps, and a web app; all three talk to the same public API. The platform stores the bytes, keeps every device's copy of the tree in step, records history, and enforces who may read or change what. The platform covers:
+
+- Files of any type, from a few bytes to the 5 TB maximum that Google Drive documents for a single upload <Cite href="https://developers.google.com/workspace/drive/api/guides/limits" title="Usage limits" author="Google Drive API" />, organized in folders.
+- Uploads that survive dropped connections, and edits that send only the parts of a file that changed.
+- A desktop client that keeps a local folder in sync both ways, including edits made offline.
+- Version history and a trash you can restore from.
+- Sharing with people, groups, and "anyone with the link", as viewer, commenter, or editor, inherited down folders.
+- Storage quotas per account.
+
+Real-time co-editing inside a document, where two cursors type into the same paragraph, is a different problem with different tools, and we leave it to its own chapter. Here a file is an opaque sequence of bytes.
+
+## Requirements
+
+### Functional
+
+1. Users upload, download, rename, move, and delete files and folders from web, desktop, and mobile clients.
+2. Large uploads <Term id="resumable-upload">resume after an interruption</Term> instead of starting over, and an edit to part of a file uploads roughly that part, not the whole file.
+3. Every device a user signs in to converges on the same tree. Changes made offline sync when the device reconnects.
+4. Two edits to the same file never silently destroy one another. If they collide, both survive and the user sees both, as a <Term id="conflicted-copy">conflicted copy</Term>.
+5. Older versions of a file can be restored. We match the policy Google documents for uploaded files: a version is kept for 30 days or until there are 100 newer ones, and a user can pin a version to keep it forever <Cite href="https://support.google.com/drive/answer/2409045" title="Check activity & file versions" author="Google Drive Help" />.
+6. A file or folder can be shared with users, groups, or anyone with the link, as viewer, commenter, or editor. Sharing a folder shares everything inside it.
+7. Deleted items go to the trash and can be restored for 30 days, after which they are deleted permanently, as Google Drive does <Cite href="https://support.google.com/drive/answer/2375102" title="Delete files in Google Drive" author="Google Drive Help" />.
+8. Each account has a storage quota. A free Google account, for comparison, gets 15 GB shared across Gmail, Drive, and Photos <Cite href="https://support.google.com/accounts/answer/9312312" title="How your Google storage works" author="Google Account Help" />.
+
+### Non-functional
+
+- **Durability:** an acknowledged file is never lost. We target <Term id="durability-nines">99.999999999% (eleven nines)</Term> annual durability for file content, and metadata never loses a committed change.
+- **Availability:** <Term id="availability-nines">99.99%</Term> (≈ 53 minutes of downtime a year) for browsing and downloading, 99.9% (≈ 8.8 hours a year) for uploads. Losing the ability to upload for a few minutes is annoying; losing access to your files is not acceptable.
+- **Sync latency:** a change made on one online device appears on the user's other online devices within 10 s at <Term id="p99">p99</Term>.
+- **Consistency:** each <Term id="namespace">namespace</Term>, meaning one user's drive, one shared folder, or one shared drive, is strongly consistent, with <Term id="read-your-writes">read-your-writes</Term> for the person making the change. A folder listing never shows a file whose upload has not finished. Search results and "recent files" may lag by a few seconds.
+- **Revocation is immediate:** once someone loses access, their next request is denied, and they never see content added after the removal. This is the <Term id="new-enemy-problem">new enemy problem</Term>, and we will need a specific mechanism for it.
+- **Efficiency:** re-uploading an unchanged file costs almost nothing, and changing 1 MB of a 1 GB file uploads about one block, not 1 GB.
+
+Notice what is *not* on the list: merging two edited copies of a binary file. Nobody can merge two Keynote files automatically, so a correct system keeps both and lets a person decide.
+
+## Back-of-the-envelope estimation
+
+We size the system in five steps: who stores what, how many changes arrive, how much metadata that means, what it costs to store the bytes durably, and how many devices stay connected. The numbers are deliberately round; we want the right order of magnitude and, more importantly, to learn which resource is actually scarce.
+
+### Users and data
+
+**Assume 1 billion registered users, 200 million of them active on a given day, storing 2 GB each on average.** Most accounts are far below their quota; a few hold terabytes.
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Logical data stored | 1B users × 2 GB | 2 EB |
+
+**Assume 500 files and folders per user.**
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Entries (files and folders) | 1B users × 500 | 500 billion |
+| Average file size | 2 GB ÷ 500 | ≈ 4 MB |
+
+The average hides a skew that matters later: most files are small documents and photos, and a small share of large videos and archives holds most of the bytes.
+
+### Traffic
+
+**Assume each active user creates or edits 5 files a day, and peak traffic is three times the average.**
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| File writes per day | 200M users × 5 | 1 billion |
+| Average write rate | 1B ÷ 86,400 seconds | ≈ 11.6k per second |
+| Peak write rate | 11.6k × 3 | ≈ 35k per second |
+
+**Assume each write sends 1 MB of genuinely new bytes.** New files send everything; edits send only the blocks that changed (the first deep dive shows how). Reads are about twice the writes, because each change is downloaded by the user's other devices and by collaborators, plus previews and downloads.
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Upload volume per day | 1B writes × 1 MB | 1 PB |
+| Average upload bandwidth | 1 PB ÷ 86,400 s | ≈ 11.6 GB/s (≈ 93 Gbps) |
+| Peak upload bandwidth | 93 Gbps × 3 | ≈ 280 Gbps |
+| Download volume per day | 2 × 1 PB | 2 PB |
+| Peak download bandwidth | 280 Gbps × 2 | ≈ 560 Gbps |
+| Storage growth per year | 1 PB × 365 | ≈ 365 PB, before deletes |
+
+That is a lot of bandwidth, but it is the kind that spreads across many machines and regions. It is not what makes this system hard.
+
+### Metadata
+
+Every listing, rename, sync check, search, and share is a metadata operation, and every one of them also needs a permission check. **Assume 100 metadata requests per active user per day** across all of their devices.
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Metadata requests per day | 200M users × 100 | 20 billion |
+| Average rate | 20B ÷ 86,400 s | ≈ 230k per second |
+| Peak rate | 230k × 3 | ≈ 700k per second |
+| Permission checks at peak | one per request | ≈ 700k per second |
+
+**Assume about 1 KB of metadata per entry** (name, parent, owner, size, timestamps, current version, and a pointer to its list of blocks), and blocks of about 4 MB with a 100-byte index row each (hash, location, size).
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| File and folder metadata | 500 billion × 1 KB | ≈ 500 TB, 1.5 PB with three replicas |
+| Blocks | 2 EB ÷ 4 MB | ≈ 500 billion |
+| Block index | 500 billion × 100 bytes | ≈ 50 TB |
+
+Here is the first real insight. The metadata store holds half a petabyte of tiny rows, serves 700k requests per second at peak, and must be strongly consistent, because a sync client that sees a half-committed folder will happily delete the user's files to match it. **Metadata, not bytes, is the hard scaling problem.**
+
+### Storage
+
+The bytes are a cost problem. Three full copies of everything is the simplest way to survive disk, machine, and data-center failures, but it triples the disk bill. <Term id="erasure-coding">Erasure coding</Term> gets the same protection for much less: Meta's f4 storage system brought its effective replication factor for warm data down to 2.1 using Reed-Solomon coding inside a data center plus XOR coding across data centers <Cite href="https://www.usenix.org/conference/osdi14/technical-sessions/presentation/muralidhar" title="f4: Facebook's Warm BLOB Storage System" author="Muralidhar et al." year="2014" />. **Assume 20 TB drives.**
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Raw disk with three copies | 2 EB × 3 | 6 EB ≈ 300k drives |
+| Raw disk with erasure coding | 2 EB × 2.1 | 4.2 EB ≈ 210k drives |
+| Saved | 6 EB − 4.2 EB | 1.8 EB ≈ 90k drives |
+
+**Assume old versions add at most 30 days of overwritten data**, since that is how long we keep them.
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Version history, upper bound | 1 PB per day × 30 days | ≤ 30 PB, about 1.5% of the total |
+
+Version history is cheap because blocks that did not change are shared between versions. Ninety thousand drives saved by coding, on the other hand, is real money, which is why the fourth deep dive exists.
+
+### Sync connections
+
+**Assume 1.5 devices per active user, 40% of them online at peak, and 100k open connections per server.**
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Devices in use per day | 200M × 1.5 | 300M |
+| Connected at peak | 300M × 40% | 120M |
+| Connection servers | 120M ÷ 100k | ≈ 1,200 |
+| Polling every 30 s instead | 120M ÷ 30 s | 4M requests per second |
+
+That last row is why clients cannot ask "anything new?" every 30 seconds: idle polling alone would be six times all the useful metadata traffic combined.
+
+## API design
+
+All endpoints are HTTPS, authenticated with OAuth bearer tokens, and versioned under `/v1`. The API is shaped around one idea: **a file version is a list of content blocks**, so uploading is "send the blocks the server lacks, then commit the list".
+
+### Upload a file
+
+The client splits the file into blocks, hashes each block with SHA-256, and starts an upload by describing the file.
+
+```http title="Start an upload"
+POST /v1/uploads
+Authorization: Bearer eyJhbGciOi...
+Content-Type: application/json
+
+{
+  "namespace_id": "ns_8812",
+  "parent_id": "fld_42",
+  "name": "Q3 review.key",
+  "size": 314572800,
+  "blocks": ["9f2c41d0...", "b71e09aa...", "04aa7c3e..."]
+}
+```
+
+The server answers with the blocks it does not already have. For an edit to an existing file, that is usually one or two.
+
+```json title="Response: 201 Created"
+{
+  "upload_id": "up_77c1",
+  "missing_blocks": ["b71e09aa..."],
+  "expires_at": "2026-11-01T09:00:00Z"
+}
+```
+
+The client then sends each missing block with `PUT /v1/uploads/{upload_id}/blocks/{hash}`. A block is at most 16 MB, and a block upload can itself resume from a byte offset, the way Google Drive's resumable protocol lets a client ask how many bytes arrived and continue from there <Cite href="https://developers.google.com/workspace/drive/api/guides/manage-uploads" title="Upload file data" author="Google Drive API" />. The server recomputes every hash and rejects a block whose bytes do not match its name.
+
+Finally the client commits the new version:
+
+```http title="Commit a version"
+POST /v1/files/fil_9a/revisions
+Idempotency-Key: 3c1e5b2f-7f0a-4e1d-9a44-d2b1f4e6a901
+Content-Type: application/json
+
+{
+  "upload_id": "up_77c1",
+  "base_revision": "rev_41",
+  "blocks": ["9f2c41d0...", "b71e09aa...", "04aa7c3e..."]
+}
+```
+
+`base_revision` is the version the client edited. If it is still the file's current version, the server answers `201 Created` with the new revision and its position in the <Term id="change-journal">change journal</Term>. If someone else committed in the meantime, the server answers `409 Conflict` with the current revision, and the client keeps both versions (the second deep dive explains how). The <Term id="idempotency-key">idempotency key</Term> makes a retried commit safe: a commit that timed out and is retried returns the original result instead of creating a second version.
+
+### Stay in sync
+
+A device catches up by asking for changes after the last one it applied.
+
+```http title="List changes"
+GET /v1/changes?namespace_id=ns_8812&cursor=18233&limit=500
+```
+
+```json title="Response: 200 OK"
+{
+  "changes": [
+    { "seq": 18234, "file_id": "fil_9a", "op": "revise", "revision": "rev_42" },
+    { "seq": 18235, "file_id": "fil_77", "op": "move", "parent_id": "fld_9" }
+  ],
+  "cursor": 18235,
+  "has_more": false
+}
+```
+
+This is <Term id="sync-cursor">cursor</Term> pagination over a per-<Term id="namespace">namespace</Term> log, the same shape as Google Drive's changes API, where a client stores a page token and asks for everything since <Cite href="https://developers.google.com/workspace/drive/api/guides/manage-changes" title="Retrieve changes" author="Google Drive API" />. A cursor older than the log's retention returns `410 Gone`, and the client falls back to a full listing.
+
+### Download and share
+
+`GET /v1/files/{id}/content?revision=rev_42` checks permission and answers with <Term id="signed-url">signed URLs</Term> for the file's blocks, valid for five minutes. The storage servers serve those URLs without calling back into the permission service. `POST /v1/files/{id}/permissions` grants a role (`viewer`, `commenter`, `editor`) to a user, a group, or `anyone_with_link`; `DELETE` on the same resource revokes it. Folder listings, search results, and "shared with me" use the same cursor pagination as changes.
+
+## Data model
+
+The access patterns decide the storage:
+
+1. Commit a new version of a file: tens of thousands per second, and it must be atomic.
+2. List a folder, and walk from a file up to its root.
+3. Read all changes in a namespace after a given position, in order.
+4. Look up a block by its hash.
+5. Check whether a person may read or change a file.
+
+<Figure
+  id="data-model"
+  src="./figures/data-model.svg"
+  alt="Five tables. Files belong to a namespace and point to their parent folder and to their head revision. Revisions belong to a file, hold the blocklist or point to a manifest block, and carry a consistency token. The journal records each change in a namespace with a sequence number and the file it touched. Blocks are keyed by dedup scope and hash and record their volume, offset, size, and state."
+  caption="Core metadata. Lines join each referring column to the key it refers to: crow's foot for many rows, double bar for exactly one. `head_revision` names the file's current row in `revisions`. Everything except blocks is partitioned by namespace."
+  width="wide"
+/>
+
+<FigRef id="data-model" /> shows the core tables.
+
+**Namespaces are the shard key.** A <Term id="namespace">namespace</Term> is a tree with its own change history: one user's own drive, one shared folder, or one shared drive. Every file, revision, and <Term id="change-journal">journal</Term> row carries its `namespace_id`, and all rows of one namespace live on the same shard. That makes the most important write, "commit a version and record it in the journal", a single-shard transaction. The 500 billion entries are spread over many millions of namespaces, so most shards are small and evenly loaded; the exceptions, giant shared drives, are covered in [Scaling and bottlenecks](#scaling-and-bottlenecks).
+
+**Files are identified by id, never by path.** A file row holds its `parent_id` and its `name`; the path is computed by walking parents and cached. Renaming or moving a folder with a million files inside it changes one row. Dropbox's sync engine rewrite made the same decision, giving files stable, globally unique ids so that moves are atomic regardless of subtree size <Cite href="https://dropbox.tech/infrastructure/rewriting-the-heart-of-our-sync-engine" title="Rewriting the heart of our sync engine" author="Dropbox" year="2020" />. A folder listing is an index range read on `(namespace_id, parent_id, name)`.
+
+**A revision is a <Term id="blocklist">blocklist</Term>.** Each revision records the ordered list of block hashes that reproduce the file. A small file's list fits in the row. A 5 TB file has 1.25 million 4 MB blocks, and their hashes alone are 40 MB (1.25M × 32 bytes), far too large for a database row, so large blocklists are stored as a *manifest*: a list of hashes that is itself stored as blocks, with the revision row holding only the manifest's hash. Unchanged parts of a large file share manifest blocks between versions, the same way they share data blocks.
+
+**The journal is the source of truth for sync.** Every change to a namespace (create, revise, move, rename, trash, share) appends a journal row with the next sequence number for that namespace, inside the same transaction as the change itself. The sequence number is what devices store as their <Term id="sync-cursor">cursor</Term>.
+
+**Blocks are content-addressed.** A block's key is its SHA-256 hash, so identical content is stored once and any corruption is detectable (<Term id="content-addressed-storage">content-addressed storage</Term>). The key also includes a *dedup scope*, normally the user or their organization, for reasons covered in [Security and privacy](#security-and-privacy). The block index maps `(dedup_scope, hash)` to the volume and offset that hold the bytes, and is sharded by hash, which spreads it evenly.
+
+**Storage choice.** The metadata needs transactions, secondary indexes, and strong consistency at hundreds of terabytes, which points to a sharded relational store or a distributed SQL database. Dropbox runs its metadata on Edgestore, a strongly consistent store built on thousands of MySQL shards, and later on Panda, a transactional key-value store serving tens of millions of queries per second <Cite href="https://dropbox.tech/infrastructure/panda-metadata-stack-petabyte-scale-transactional-key-value-store" title="Future-proofing our metadata stack with Panda, a scalable key-value store" author="Dropbox" year="2022" />. Either works for our design as long as a single namespace's transaction stays on one shard. The block bytes go to a separate blob store, because their access pattern (write once, read by hash, never update) has nothing in common with the metadata's.
+
+<Aside title="Quota, versions, and trash in the same transaction">
+
+The commit transaction also updates the namespace's used-bytes counter, so a quota check and the write that consumes the quota cannot race. We charge quota for a file's logical size, even when its blocks were <Term id="deduplication">deduplicated</Term>: users should not see their quota change because someone else in their organization uploaded the same video.
+
+Trashing a file sets `trashed_at` and appends a journal entry; it does not touch blocks. A daily job permanently deletes files trashed more than 30 days ago and versions past their retention, and only then do their blocks become candidates for garbage collection.
+
+</Aside>
+
+## High-level design
+
+The simplest design that works is a web server, one database, and an object store: upload the whole file to the object store, write a row, and let clients poll for a list of everything every minute. For a few thousand users it is the right design. At our scale it breaks in three places. Re-uploading 300 MB for a one-slide edit wastes bandwidth and battery. Polling 120M devices costs 4M requests per second of pure overhead. And one database cannot hold 500 TB of metadata or serve 700k requests per second. <FigRef id="high-level-design" /> splits the system along those lines.
+
+<Figure
+  id="high-level-design"
+  src="./figures/high-level-design.svg"
+  alt="Laptop A and phone B call an API gateway. The gateway routes to the block service, which stores bytes in the blob store and hashes in the block index, and to the metadata service, which checks the permission service and commits to the metadata store, sharded by namespace. Each commit is published to a change stream. The sync service sends phone B a hint, and phone B fetches changes from the metadata service and missing blocks from the block service. Workers consume the change stream to build thumbnails, update the search index, and collect garbage."
+  caption="High-level design. Numbers match the walkthrough below: ① to ④ upload and commit, ⑤ and ⑥ notify, ⑦ and ⑧ another device catches up."
+  width="wide"
+/>
+
+<Steps>
+1. The desktop client hashes the edited file's blocks and asks the block service which ones it is missing.
+2. It uploads only the missing blocks. The block service verifies each hash, writes the bytes to the blob store, and records the block in the block index.
+3. The client commits the new version to the metadata service, which checks with the permission service that the user may edit the file.
+4. The metadata service writes the revision, the new head pointer, and a <Term id="change-journal">journal</Term> entry in one transaction on the <Term id="namespace">namespace</Term>'s shard.
+5. The commit is published to the change stream.
+6. The sync service, which holds a long-lived connection to every online device, sends the user's other devices a hint: "namespace `ns_8812` changed".
+7. Each of those devices asks the metadata service for the changes after its <Term id="sync-cursor">cursor</Term>.
+8. It downloads only the blocks it does not already have, using <Term id="signed-url">signed URLs</Term> from the block service.
+</Steps>
+
+Four properties of this layout carry the rest of the chapter. **Bytes and metadata are separate:** the block service and blob store never know file names, and the metadata service never touches file content. **Blocks are immutable:** a block is written once and never changed, so caching and replication are trivial. **The journal is the truth and the sync service only hints:** if a hint is lost, the device still catches up on its next pull. **Every request passes a permission check**, and the permission service is built to answer 700k of them per second at peak. Workers behind the change stream build thumbnails and previews, feed the search index, and collect garbage; they can fall behind without affecting uploads or sync.
+
+## Deep dives
+
+Four parts of this design are genuinely hard: sending only what changed, keeping every device in agreement, deciding access at scale, and storing exabytes cheaply without loss. Each deep dive starts from the problem, compares the options, and makes a choice.
+
+### Upload only what changed [#chunked-upload]
+
+**The problem.** A user changes one slide in a 300 MB deck, or appends a page to a 1 GB PDF, or uploads a 50 GB video over hotel Wi-Fi that drops every few minutes. Sending the whole file every time wastes bandwidth and battery, and a single dropped connection near the end of a 50 GB upload must not mean starting again. We want to send roughly what changed, and to retry in small pieces.
+
+**Option 1: whole-file upload.** Simple, and fine for small files, but an edit costs the full file size, and nothing is shared between versions.
+
+**Option 2: rsync-style deltas.** The rsync algorithm lets two machines find the parts of a file they already share using a <Term id="rolling-hash">rolling checksum</Term>, and sends only the differences <Cite href="https://rsync.samba.org/tech_report/" title="The rsync algorithm" author="Andrew Tridgell, Paul Mackerras" year="1996" />. It is very efficient for one file between two machines. But the server must read the old version and compute checksums for every edit, which at 35k writes per second is a lot of disk reads, and a delta against one specific old version does not help store identical content once across files.
+
+**Option 3: fixed-size blocks.** Split every file into blocks of a fixed size, name each block by its hash, and describe a version as the ordered list of hashes. Dropbox works this way: files are split into 4 MB blocks, each hashed with SHA-256, and the file's hash is computed from the list of block hashes <Cite href="https://docs.dropboxapi.com/dropbox-api/docs/technical-reference/content-hash" title="Content hash" author="Dropbox API" />. The server never reads old versions; it only answers "which of these hashes do I lack?". Unchanged blocks cost nothing, retries happen per block, and identical blocks across versions and files are stored once.
+
+The weakness shows up when bytes are *inserted*. Add one sentence near the start of a file, and every byte after it shifts; every fixed boundary now cuts the file at a different place, every block hash changes, and the "edit" re-uploads the whole file.
+
+**Option 4: content-defined chunking.** Choose block boundaries from the content itself. A rolling hash slides over the file, and wherever the hash of the last few dozen bytes matches a chosen bit pattern, a block ends. An insertion changes the hash only near where it happened, so only the blocks around the edit change; every boundary after it lines up again on the same bytes. The Low-Bandwidth File System applied the technique to a network file system and used it to cut bandwidth by more than an order of magnitude on common workloads <Cite href="https://pdos.csail.mit.edu/archive/lbfs/pubs.html" title="A Low-bandwidth Network File System" author="Muthitacharoen, Chen, Mazières" year="2001" />. Its cost is CPU: the hash runs at every byte. FastCDC made that cheap enough for production by using a simpler rolling hash and skipping bytes that cannot be boundaries <Cite href="https://www.usenix.org/conference/atc16/technical-sessions/presentation/xia" title="FastCDC: a Fast and Efficient Content-Defined Chunking Approach for Data Deduplication" author="Xia et al." year="2016" />.
+
+<Figure
+  id="chunking-boundaries"
+  src="./figures/chunking-boundaries.svg"
+  alt="Two panels, each showing four blocks A to D before an edit (top row) and after inserting a sentence into A (bottom row). With fixed-size blocks, every boundary shifts, so all four blocks become new: A prime, B prime, C prime, D prime. With content-defined chunks, only A becomes A prime; B, C, and D keep their hashes."
+  caption="Top row before, bottom row after inserting a sentence into block A. Fixed-size blocks re-upload everything after the insertion; content-defined chunks re-upload only the block that contains it."
+  width="wide"
+/>
+
+**Our choice.** <FigRef id="chunking-boundaries" /> makes the case for <Term id="content-defined-chunking">content-defined chunking</Term>, and we use it in the desktop client, where files are edited in place and inserted bytes are common. Chunks are at least 1 MB, about 4 MB on average, and at most 16 MB. Browser and mobile uploads, which are almost always new files rather than edits, use fixed 4 MB blocks, saving phone CPU and battery. Both produce SHA-256-named blocks in the same index, so the server does not care which a client used.
+
+The block size is a deliberate trade. LBFS used chunks of about 8 KB, which finds more duplicate content, but our 2 EB would then be 250 trillion blocks and a block index tens of petabytes in size. At about 4 MB we have 500 billion blocks and a 50 TB index, and an edit costs one or two blocks of upload.
+
+<Figure
+  id="upload-sequence"
+  src="./figures/upload-sequence.svg"
+  alt="Sequence. The desktop client chunks and hashes the file and sends the list of hashes to the block service. The block service checks the block index and returns the one missing hash. The client uploads that block; the block service verifies the hash, writes it to the blob store, and records it in the block index. The client then commits the blocklist to the metadata service with its base revision. The metadata service checks permission, then writes the revision, head pointer, and journal entry in one transaction, and returns the new revision."
+  caption="Uploading an edit. Only the missing block crosses the network, and the new version becomes visible in one transaction."
+  width="wide"
+/>
+
+<FigRef id="upload-sequence" /> shows the full exchange. Three details make it reliable:
+
+- **Blocks are verified and stored before anything refers to them.** The commit fails unless every block in the list exists, so no reader can ever see a version whose bytes are missing.
+- **Retries happen in small pieces.** A failed block is resent alone, and a block upload can resume from a byte offset, so the worst case on a bad network is resending part of 16 MB. The upload session lasts a week, as Google's resumable sessions do <Cite href="https://developers.google.com/workspace/drive/api/guides/manage-uploads" title="Upload file data" author="Google Drive API" />, which covers a laptop that is closed mid-upload and opened days later.
+- **The commit is all or nothing.** The revision row, the head pointer, the quota counter, and the journal entry change in one transaction. Blocks uploaded for a commit that never happens stay unreferenced; garbage collection removes them after the session expires.
+
+<Aside title="Letting other devices start before the upload ends">
+
+With a strict upload-then-commit flow, a colleague's device cannot start downloading a 2 GB video until the last block has arrived and the version is committed. Dropbox's "streaming sync" removes that wait: other devices start fetching blocks while the upload is still in progress, which Dropbox reported made sync of large files up to twice as fast <Cite href="https://dropbox.tech/infrastructure/streaming-file-synchronization" title="Streaming File Synchronization" author="Dropbox" year="2014" />. In our design the equivalent is to publish an "upload in progress" hint with the <Term id="blocklist">blocklist</Term>, so other clients can prefetch blocks that are already stored. Nothing becomes visible to users until the commit.
+
+</Aside>
+
+### Keeping every device in sync [#sync]
+
+**The problem.** 120 million devices are online at peak, and each must converge on the right tree, quickly, including after a week offline. Two of them may edit the same file. One may rename a folder while another adds a file to it. And whatever happens, a sync client must never conclude that files were deleted when they were not, because it will then delete them on disk.
+
+**Option 1: poll the whole tree.** Each device lists everything every 30 seconds and compares. We already computed the cost: 4M requests per second at peak, almost all of them returning "nothing new", and each listing grows with the size of the drive.
+
+**Option 2: compare timestamps.** Each device asks for files modified since its last sync. Clocks on different servers and devices disagree, a delete leaves no row to have a timestamp, and two changes in the same millisecond can be missed. Timestamps are a hint, not an order.
+
+**Option 3: a change journal with cursors, plus push hints.** Every <Term id="namespace">namespace</Term> has a <Term id="change-journal">change journal</Term>: an append-only list of changes numbered 1, 2, 3, and so on, written in the same transaction as the change itself. Each device stores a <Term id="sync-cursor">sync cursor</Term> per namespace, the number of the last change it applied, and asks for everything after it. Because numbers are assigned inside the commit transaction, they appear in order with no gaps, and a device can never skip a change. Google Drive's public API exposes exactly this shape: a client fetches a start token, stores it, and later lists the changes since that token <Cite href="https://developers.google.com/workspace/drive/api/guides/manage-changes" title="Retrieve changes" author="Google Drive API" />.
+
+Pulling still needs a trigger. Instead of polling, each device keeps one long-lived connection to the sync service, and when a namespace changes, the sync service sends "namespace `ns_8812` is now at 18235". The hint carries no data. If it is lost, delayed, or duplicated, nothing breaks: the device pulls on every hint, on every reconnect, and every few minutes as a safety net. Google Drive's notifications work the same way, as a signal to go and fetch changes <Cite href="https://developers.google.com/workspace/drive/api/guides/push" title="Notifications for resource changes" author="Google Drive API" />.
+
+**Our choice** is option 3: the journal is the truth, the push is a hint, and the client pulls. <FigRef id="sync-sequence" /> shows a change travelling from one laptop to a phone.
+
+<Figure
+  id="sync-sequence"
+  src="./figures/sync-sequence.svg"
+  alt="Sequence. Laptop A commits a revision to the metadata service, which appends journal entry 18235 and publishes the change. The sync service sends phone B a hint that the namespace is at 18235. Phone B asks for changes after its cursor 18233 and receives entries 18234 and 18235, downloads the one block it lacks, applies the changes, and stores cursor 18235. A lost hint is covered by the periodic pull."
+  caption="Sync is pull-based. The hint only says something changed; the phone's cursor says what it has seen, so a lost hint costs latency, never correctness."
+  width="wide"
+/>
+
+The journal is kept for 60 days. A device offline for longer gets `410 Gone` for its cursor and rebuilds its view from a full listing, the expensive path we accept for a rare case.
+
+**The client side: three trees.** The desktop client has a harder job than the server: it must decide, for every difference between disk and server, which side changed. Dropbox's rewritten sync engine keeps three trees for this: the remote tree (the server's latest state), the local tree (what is on disk), and the synced tree, the last state on which both agreed <Cite href="https://dropbox.tech/infrastructure/-testing-our-new-sync-engine" title="Testing sync at Dropbox" author="Dropbox" year="2020" />. The synced tree is a <Term id="merge-base">merge base</Term>, and without it the client cannot tell a new file on the server from a file the user has deleted locally. We use the same model: if local and synced agree but remote differs, the change came from the server; if remote and synced agree but local differs, the user made it; if all three differ, it is a conflict.
+
+**Conflicts.** Two devices edited the same file while one of them was offline. Each commit carries `base_revision`, the version the client started from, and the server accepts it only if that is still the file's head. This is <Term id="optimistic-concurrency">optimistic concurrency control</Term>: no locks while the user edits for an hour on a plane, one comparison at commit time.
+
+<Figure
+  id="conflict-flow"
+  src="./figures/conflict-flow.svg"
+  alt="Sequence. Laptop A and laptop B both start from revision 41 of the deck. Laptop B commits first and the server creates revision 42. Laptop A, back online, commits with base revision 41; the server rejects it with 409 Conflict because the head is now 42. Laptop A downloads revision 42 into the original path and uploads its own edit as a new file named as A's conflicted copy, so both edits survive."
+  caption="Two offline edits to the same file. The second commit's base is stale, so it becomes a conflicted copy instead of overwriting the first."
+  width="wide"
+/>
+
+As <FigRef id="conflict-flow" /> shows, the losing commit becomes a <Term id="conflicted-copy">conflicted copy</Term>, "Q3 review (Alice's conflicted copy 2026-10-25).key", and the user decides how to merge. We never pick a winner by timestamp: last-writer-wins on a binary file silently destroys an hour of someone's work.
+
+Structural changes need rules too, and every rule prefers keeping data over tidiness:
+
+- **Edit versus delete.** One device edits a file another deleted. The edit wins and the file comes back, because a resurrected file is an annoyance and a lost edit is a disaster.
+- **Rename versus edit.** No conflict at all: the file is identified by id, so the rename changes its name and the edit changes its contents.
+- **Two moves that would create a cycle.** One device moves folder Archive into Drafts while another moves Drafts into Archive. The second move to reach the server is rejected, and its client puts the folder back. Dropbox's engine handles this case the same way, keeping the original folders, with the result depending on which move commits first <Cite href="https://dropbox.tech/infrastructure/rewriting-the-heart-of-our-sync-engine" title="Rewriting the heart of our sync engine" author="Dropbox" year="2020" />.
+
+<Aside title="Shared folders become their own namespaces">
+
+Each namespace has its own journal and its own cursor. When a user first shares a folder, we turn that folder into a new namespace and *mount* it in the owner's tree; each collaborator's client mounts it in theirs and keeps one more cursor. A change inside it is written once, to the shared namespace's journal, and every member's devices read it from there.
+
+The alternative, writing each change into every member's personal journal, makes a write to a folder shared with 10,000 people cost 10,000 journal rows. The price of our choice is paid once: converting an existing folder with a million files moves its metadata rows to the new namespace's shard, which is a background job during which the folder is briefly read-only.
+
+</Aside>
+
+### Sharing and permissions [#permissions]
+
+**The problem.** At peak we answer about 700k permission checks per second, each in a few milliseconds, because every listing, download, and sync request needs one. Permissions inherit: sharing a folder shares everything inside it, folders nest twenty levels deep, and the person may hold access through a group of 100,000 members. A user also needs the reverse question answered, "what has been shared with me?", which cannot be computed by checking every file in the system. And the hardest requirement of all: once access is revoked, nothing that happens after the revocation may be visible to the revoked person.
+
+**Option 1: copy permissions onto every file.** When a folder is shared, write the grant onto every descendant. Checks become one lookup. But sharing a folder with a million files means a million writes, moving a file between folders means recomputing its grants, and a revocation half-applied when a server dies leaves files in an inconsistent state.
+
+**Option 2: store grants on the folder and walk up at check time.** Writes are cheap, but a check for a file twenty levels deep reads up to twenty ancestors, and group membership adds more reads. At 700k checks per second that is over ten million reads per second, before caching.
+
+**Option 3: a dedicated relation-tuple service.** Store each permission fact as a <Term id="relation-tuple">relation tuple</Term> and let one service evaluate them. Google runs exactly this kind of service, Zanzibar, for Drive and hundreds of other products. It stores trillions of access rules, answers millions of checks per second with 95th-percentile latency under 10 ms, and has run at more than 99.999% availability <Cite href="https://www.usenix.org/conference/atc19/presentation/pang" title="Zanzibar: Google's Consistent, Global Authorization System" author="Pang et al." year="2019" />.
+
+**Our choice** is option 3. Permissions are tuples of the form *object, relation, subject*, and rules say how relations combine:
+
+```text title="permission tuples and rules"
+file:deck#parent          @ folder:q3
+folder:q3#parent          @ folder:planning
+folder:planning#editor    @ group:finance#member
+group:finance#member      @ user:alice
+
+rule: viewer(x)  = direct viewers of x  ∪ editor(x)  ∪ viewer(parent(x))
+rule: editor(x)  = direct editors of x  ∪ owner(x)   ∪ editor(parent(x))
+```
+
+To check whether Alice may view the deck, the service follows `deck → q3 → planning`, finds that `group:finance` are editors there, and that Alice is a member. <FigRef id="permission-graph" /> draws that path.
+
+<Figure
+  id="permission-graph"
+  src="./figures/permission-graph.svg"
+  alt="A file named deck has parent folder q3, whose parent is folder planning. Folder planning grants editor to the members of group finance, and user alice is a member of group finance. The check 'can alice view deck' follows the parent links up to planning, then the editor grant to the group, then the group membership to alice. A separate anyone-with-link grant on folder q3 is shown as a second, independent path."
+  caption="A permission check is a short walk over relation tuples: up the folder tree, then through group membership."
+  width="wide"
+/>
+
+Inheritance now costs nothing at write time. Sharing a folder with a million files writes one tuple; moving a file changes one `parent` tuple, and its access changes with it. The service caches aggressively: folder chains change rarely, and group memberships are flattened ahead of time for very large groups.
+
+**The reverse question.** "Shared with me" cannot be answered by walking the graph. When a grant is added or removed, an asynchronous job updates a per-user index of items shared with them, one row per user for direct grants and per member for group grants. A grant to a 100,000-member group is 100,000 index writes, done in the background; the listing lags by seconds, which the requirements allow.
+
+**The <Term id="new-enemy-problem">new enemy problem</Term>.** Alice removes Bob from the Planning folder, then uploads `salaries.xlsx` into it. A permission check served from a replica that has not yet applied the removal would still let Bob in, and he would see a file created after he lost access. Zanzibar's answer is a <Term id="consistency-token">consistency token</Term>, which it calls a zookie: a write returns a token for the point in time it happened, and content is stored with the token of the moment it was written <Cite href="https://www.usenix.org/conference/atc19/presentation/pang" title="Zanzibar: Google's Consistent, Global Authorization System" author="Pang et al." year="2019" />. Our commit stores the token with each revision, and a check for that revision must be evaluated on permission data at least that recent. A replica that is behind either catches up or forwards the check. Bob's request for `salaries.xlsx` is therefore evaluated against permission data that already includes his removal.
+
+**Links and downloads.** "Anyone with the link" is one more tuple, keyed by an unguessable link token of at least 128 random bits. Content is served through <Term id="signed-url">signed URLs</Term> that expire after five minutes, so a revoked user's already-issued download links stop working within minutes, without the blob store having to understand permissions.
+
+### Storing exabytes without losing a byte [#blob-storage]
+
+**The problem.** Two exabytes of blocks, growing by a petabyte a day, must survive disk failures, machine failures, and the loss of a whole data center, at eleven nines of durability. Most of the bytes are read rarely after the first few days. Deleting must be safe even though one block may belong to many versions and many files.
+
+**Separate the bytes from everything else.** The blob store knows nothing about files, folders, or users: it stores immutable blocks by hash and returns them. Dropbox's Magic Pocket is built this way. Blocks of up to 4 MB, keyed by SHA-256 and never modified after writing, are grouped into 1 GB containers, while edits are tracked in a separate file journal <Cite href="https://dropbox.tech/infrastructure/inside-the-magic-pocket" title="Inside the Magic Pocket" author="Dropbox" year="2016" />. Packing blocks into large volumes matters at our scale: 500 billion small objects would overwhelm the storage layer's own bookkeeping, while 2 EB in 1 GB volumes is about 2 billion volumes, 250 times fewer things to track, replicate, and repair.
+
+**Option 1: three copies everywhere.** Simple, fast to read, fast to repair, and 6 EB of raw disk.
+
+**Option 2: <Term id="erasure-coding">erasure coding</Term>.** Split each volume into *k* data pieces, compute *m* parity pieces, and spread all *k* + *m* across racks or data centers; any *k* pieces rebuild the volume. Backblaze stores data as 17 data and 3 parity shards, surviving the loss of any three <Cite href="https://www.backblaze.com/blog/reed-solomon/" title="Backblaze Open-sources Reed-Solomon Erasure Coding Source Code" author="Backblaze" />. Meta's f4 combines Reed-Solomon (10, 4) inside a data center with XOR coding across data centers for an effective replication factor of 2.1, down from 3.6 in its previous system <Cite href="https://www.usenix.org/conference/osdi14/technical-sessions/presentation/muralidhar" title="f4: Facebook's Warm BLOB Storage System" author="Muralidhar et al." year="2014" />.
+
+**Our choice: replicate while hot, erasure-code when warm.** New blocks land in an open volume replicated three times across zones, because recent files are read and rewritten often and replicas serve reads from one disk. Magic Pocket similarly replicates new blocks first and copies them to a second zone within a second of upload <Cite href="https://dropbox.tech/infrastructure/inside-the-magic-pocket" title="Inside the Magic Pocket" author="Dropbox" year="2016" />. After about 30 days, sealed volumes are erasure-coded at roughly 2.1× and the replicas are dropped. <FigRef id="blob-storage-tiers" /> shows the two tiers.
+
+<Figure
+  id="blob-storage-tiers"
+  src="./figures/blob-storage-tiers.svg"
+  alt="The block service writes new blocks to the hot tier: open 1 GB volumes kept as three copies across zones for about 30 days. Volumes are then sealed and encoded into the warm tier, Reed-Solomon 10 plus 4 in each region plus XOR parity across regions, about 2.1 times overhead. Reads of older files come from the warm tier. A scrubber verifies both tiers and rebuilds corrupted pieces in the warm tier."
+  caption="Two storage tiers. About 30 PB of recent data stays replicated three times; the remaining ~2 EB is erasure coded at about 2.1×."
+  width="wide"
+/>
+
+The arithmetic from the estimate: the hot tier holds 30 days of uploads, 30 PB stored three times, or 90 PB of raw disk. The warm tier holds the remaining ~2 EB at 2.1×, about 4.2 EB. Together that is about 4.2 EB. Against three copies of everything (6 EB), it saves roughly 1.8 EB of disk, close to 90,000 drives of 20 TB.
+
+**Repair is the hidden cost of coding.** **Assume a 1% annual drive failure rate** across 210,000 drives.
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Failed drives per year | 210k × 1% | 2,100 |
+| Failed drives per day | 2,100 ÷ 365 | ≈ 6 |
+| Data read to rebuild one 20 TB drive | 20 TB × 10 pieces read per lost piece | ≈ 200 TB |
+| Repair reads per day | 6 × 200 TB | ≈ 1.2 PB |
+
+Rebuilding one lost piece under Reed-Solomon (10, 4) means reading ten surviving pieces, so repair traffic is as large as all user uploads combined. It has to be scheduled, rate-limited, and spread across the whole cluster, and it is the reason some storage systems use codes designed to repair from fewer pieces. Background <Term id="scrubbing">scrubbing</Term> reads every piece on a cycle and checks it against its checksum, so silent corruption is found and repaired while plenty of parity remains.
+
+**Deleting safely.** One block can be referenced by many versions of many files, and the obvious approach, a reference count per block, deleted when it reaches zero, loses data under concurrency. A new upload asks "do you have block `b71e…`?" and is told yes; a moment later the last old version that used it expires, the count drops to zero, and the block is deleted; the upload then commits a version that refers to a block that no longer exists. A user's file is now corrupt, and nobody will notice until they open it.
+
+We use <Term id="mark-and-sweep">mark-and-sweep</Term> with a grace period instead, as <FigRef id="block-lifecycle" /> shows. A periodic job marks every block referenced by any live revision or any open upload session. A block that stays unmarked becomes a *deletion candidate* with a timestamp. A "missing blocks" check that finds a candidate takes it back to live, and the commit re-validates every block. Only after a grace period longer than the longest upload session (seven days) does the sweeper delete it, and even then the bytes stay in a tombstoned volume for a further week before the space is reclaimed. Garbage collection is the one component that can destroy user data on its own, so it is slow and conservative by design.
+
+<Figure
+  id="block-lifecycle"
+  src="./figures/block-lifecycle.svg"
+  alt="State machine for a block. A block is uploaded, then becomes referenced when a commit uses it. When no live revision or upload session refers to it, the mark job moves it to unreferenced. A new reference during the grace period moves it back to referenced. After a grace period longer than the upload session lifetime, it becomes swept and its bytes move to a tombstoned volume. After a further retention period the space is reclaimed. Uploaded blocks never committed become unreferenced when their upload session expires."
+  caption="A block's life. Deletion is two-stage and reversible until the very end, because garbage collection is the one component that can destroy data on its own."
+  width="wide"
+/>
+
+<Aside title="Why the bill eventually decides to build">
+
+At small scale a cloud object store is the right blob store: durable, elastic, and someone else's pager. At exabyte scale the storage bill becomes one of the largest lines in the company. Dropbox started on Amazon S3 and by 2016 stored and served over 90% of its users' data on its own infrastructure, while continuing to use Amazon where that made sense, such as storing data in Germany for European business customers <Cite href="https://dropbox.tech/infrastructure/magic-pocket-infrastructure" title="Scaling to exabytes and beyond" author="Dropbox" year="2016" />. The design in this section is what makes that possible: because the blob store only stores immutable blocks by hash, it can be swapped without touching anything above it.
+
+</Aside>
+
+## Scaling and bottlenecks
+
+**At today's peak.** About 35k commits and 700k metadata requests per second. The metadata store is sized by data, not by traffic: 500 TB of rows at, say, 2 TB per shard is 250 primary shards. Each commit writes about four rows (revision, head pointer, quota counter, <Term id="change-journal">journal</Term> entry), so 140k row writes per second across 250 shards is about 560 per shard, comfortable. Reads are mostly served from caches in front of the store, because folder listings and permission chains change far less often than they are read.
+
+**Hot <Term id="namespace">namespaces</Term>.** The design assumes namespaces are small, and some are not. Each one is a potential <Term id="hot-partition">hot partition</Term>: a company-wide shared drive with 100,000 members is one namespace, on one shard, with one journal whose sequence numbers are assigned one commit at a time. Two things break first:
+
+- **Journal writes.** Every commit to that drive serializes on its journal counter. We batch commits that arrive together into one transaction (group commit), and very large organizations are encouraged to split one drive into several, each with its own journal.
+- **Notification <Term id="fan-out">fan-out</Term>.** One change produces a hint for every online device of every member: 100,000 members × 1.5 devices × 40% online ≈ 60,000 hints. At a few commits per second that is hundreds of thousands of hints per second from a single drive. The sync service coalesces them: each device gets at most one hint per namespace every five seconds, which carries the latest sequence number, so a burst of 50 commits becomes one pull.
+
+**Giant folders.** A folder with a million children (machine-generated logs, photo dumps) breaks clients that list it in one call. Listings are always paginated by name with a <Term id="sync-cursor">cursor</Term>, and the desktop client streams large listings instead of loading them into memory.
+
+**Bandwidth.** About 280 Gbps of uploads and 560 Gbps of downloads at peak are spread across regions; downloads of widely shared public links are served through a CDN using signed, cacheable URLs.
+
+**At ×10** (2 billion daily users' worth of activity, 20 EB stored, 7M metadata requests per second). Metadata grows to about 2,500 shards, still well within what a sharded store handles, but the permission service now answers millions of checks per second and needs its own caching tier and pre-flattened group memberships, as Zanzibar does. Repair traffic (12 PB a day) needs its own network plan.
+
+**At ×100.** Single regions can no longer hold whole populations. Users are homed in a region near them, and their namespaces' metadata lives there, with cross-region sharing paying extra latency. The blob store's warm tier moves to denser, colder media, and the economics of the blob store dominate every other decision.
+
+<Figure
+  id="scaled-design"
+  src="./figures/scaled-design.svg"
+  alt="A CDN for public links sits in front of two regions. Each region has an API gateway, the block, metadata, sync, and permission services, metadata shards holding its own users' namespaces plus an asynchronous replica of the other region's, and a hot tier across three zones. Both hot tiers seal and encode into one warm tier that is erasure coded across regions at about 2.1 times."
+  caption="The design at scale: users and their namespaces are homed in a region, the warm tier spans regions, and a CDN absorbs public links."
+  width="wide"
+/>
+
+<FigRef id="scaled-design" /> shows the multi-region shape.
+
+## Reliability and failure modes
+
+| Component | Failure | Detection | Mitigation |
+| --- | --- | --- | --- |
+| Client network | Connection drops mid-block | Upload session status | Ask how many bytes arrived, resume from that offset |
+| Client | Blocks uploaded, commit never sent | Session expires | Unreferenced blocks are garbage-collected after the grace period |
+| Metadata service | Commit times out, outcome unknown | Client timeout | Retry with the same <Term id="idempotency-key">idempotency key</Term>; returns the original revision |
+| Any hop | Bytes corrupted in transit or on disk | Hash mismatch on upload; <Term id="scrubbing">scrubbing</Term> | Reject on upload; rebuild from replicas or parity |
+| Metadata shard | Primary fails | Health checks, replication lag | Fail over to a replica; uploads to that <Term id="namespace">namespace</Term> pause seconds, downloads continue |
+| Sync service | A connection server dies | Clients see the socket close | Reconnect anywhere; pull since <Term id="sync-cursor">cursor</Term>, so no change is missed |
+| Change stream | Thumbnail or indexer worker crashes on a malformed file | Repeated failures for one file | Retry a few times, then park the file in a <Term id="dead-letter-queue">dead-letter queue</Term>; sync is unaffected |
+| Desktop client | Two devices rewrite the same file in a loop | Revision rate per file and device | Rate-limit commits per device; flag the pair; <Term id="conflicted-copy">conflicted copy</Term> instead of ping-pong |
+| Blob store | Drives fail (≈ 6 a day) | Disk health, scrub errors | Rebuild from parity, rate-limited across the cluster |
+| Region | Region lost | Region health | Warm data survives through cross-region coding; recent hot blocks replicate to another zone within seconds; metadata fails over to its replica |
+| Garbage collector | A bug marks live blocks as garbage | Block-not-found on read | Grace period, tombstoned volumes, and an alert on the first block-not-found |
+
+Two rows deserve emphasis. A **region loss** has a <Term id="rpo">recovery point objective (RPO)</Term> of seconds for metadata, because metadata replicates asynchronously, and a <Term id="rto">recovery time objective (RTO)</Term> of minutes while namespaces fail over. Content uploaded in the last seconds may need to be re-sent by its client, which still has it on disk. **A garbage-collection bug** is the only failure in the table that can permanently destroy acknowledged data, which is why its last two safeguards, the tombstone retention and a page on the first block-not-found, exist even though they should never fire.
+
+## Observability
+
+We measure what users feel, end to end, and what could silently lose data.
+
+**Service-level objectives:**
+- Uploads: 99.9% of block uploads and commits succeed, excluding requests the client cancelled.
+- Sync: <Term id="p99">p99</Term> time from a commit on one device to it being applied on another online device under 10 s. Measured by canary accounts on real devices in every region that write a file and time its arrival.
+- Downloads and listings: 99.99% success, p99 under 300 ms for metadata reads.
+- Durability: zero blocks that cannot be reconstructed, measured continuously by <Term id="scrubbing">scrubbing</Term>.
+
+**Key metrics and alerts:**
+- **Block-not-found on read.** Should be zero forever. One occurrence pages the storage team, because it means either a garbage-collection bug or real data loss.
+- **Conflict rate by client version.** A new desktop release that doubles <Term id="conflicted-copy">conflicted copies</Term> has a sync bug; roll it back.
+- **<Term id="change-journal">Journal</Term> lag and hint delivery.** Time from commit to hint, and the share of pulls triggered by the safety-net timer instead of a hint (a rising share means hints are being lost).
+- **<Term id="sync-cursor">Cursor</Term>-expired resyncs.** Rising numbers mean devices stay offline longer than the journal retention, or a client bug is resetting cursors.
+- **Permission check latency and cache hit rate**, and checks forwarded because a replica was behind a <Term id="consistency-token">consistency token</Term>.
+- **Repair backlog** in the blob store: pieces waiting to be rebuilt, and the time the oldest has been waiting.
+
+**Tracing.** Each upload carries an id from the first hash request through block writes, the commit, the journal entry, and every device that applied it. "My file didn't sync" becomes one lookup: which devices pulled the change, and which never received a hint.
+
+## Security and privacy
+
+**Encryption.** All traffic uses TLS. At rest, blocks use <Term id="envelope-encryption">envelope encryption</Term>: each dedup scope has its own data keys, encrypted by key-encryption keys held in a key-management service. That makes deletion enforceable: destroying a scope's keys renders every copy, replica, and backup of its blocks unreadable at once, which is <Term id="crypto-shredding">crypto-shredding</Term>. It is how we honor "delete my account" for data that also sits in <Term id="erasure-coding">erasure-coded</Term> volumes and backups.
+
+**Why <Term id="deduplication">deduplication</Term> stops at the user or organization.** Global deduplication across all users would save more space, but it leaks information. If uploading a file is instant because "the server already has it", an attacker can test whether *anyone* has stored a particular document, for example a contract with a guessed salary in it, by trying variations and timing the uploads. Harnik, Pinkas, and Shulman-Peleg showed that cross-user deduplication creates exactly this side channel <Cite href="https://doi.org/10.1109/MSP.2010.187" title="Side Channels in Cloud Services: Deduplication in Cloud Storage" author="Harnik, Pinkas, Shulman-Peleg" year="2010" />. Scoping deduplication to a user or organization keeps most of the savings, since most duplicates are a user's own copies and versions, and closes the channel. It also keeps encryption keys and deletion per tenant.
+
+**Sharing abuse.** "Anyone with the link" makes the service a free file host for malware and phishing pages. Newly shared public files are scanned asynchronously; a file flagged as malicious is blocked for link access, and download warnings are shown for files that cannot be scanned. Link tokens are long and random, so links cannot be enumerated, and owners can see and revoke every active link.
+
+**Least privilege for operators.** Engineers can see metadata needed to debug, but content access requires a ticket, an approval, and an audit log entry. <Term id="signed-url">Signed URLs</Term> mean the storage tier never needs broad credentials.
+
+**Data residency.** Some organizations must keep data in a given country or region. Because users and their <Term id="namespace">namespaces</Term> are homed in a region, a namespace can be pinned to one, with its blocks' hot and warm tiers kept inside it. Dropbox, for example, stores data in Germany for some European business customers <Cite href="https://dropbox.tech/infrastructure/magic-pocket-infrastructure" title="Scaling to exabytes and beyond" author="Dropbox" year="2016" />.
+
+## Trade-offs and alternatives
+
+<Tradeoffs>
+| Decision | Chosen | Alternative | Why |
+| --- | --- | --- | --- |
+| Unit of upload | <Term id="content-addressed-storage">Content-addressed</Term> blocks, about 4 MB | Whole files; rsync deltas | Edits cost a block, retries are small, versions share blocks, and the server never reads old versions |
+| Chunking | Content-defined on desktop, fixed 4 MB on web and mobile | Fixed everywhere | Insertions are common in desktop edits; phones save CPU on what are mostly new uploads |
+| Large <Term id="blocklist">blocklists</Term> | Manifest stored as blocks | Hashes in the revision row | A 5 TB file has 40 MB of hashes; manifests share blocks between versions |
+| Metadata store | Sharded by <Term id="namespace">namespace</Term>, strongly consistent | Eventually consistent store | A sync client acting on a half-committed tree deletes real files |
+| File identity | Stable ids, parent pointer | Paths as keys | Moves and renames change one row, regardless of subtree size |
+| Sync | Per-namespace <Term id="change-journal">journal</Term>, <Term id="sync-cursor">cursors</Term>, push hints | Polling; timestamps | Gap-free ordering; a lost hint costs latency, never correctness; 4M polls per second avoided |
+| Conflicts | <Term id="conflicted-copy">Conflicted copy</Term> | Last writer wins | Binary files cannot be merged; losing an hour of work is worse than an extra file |
+| Shared folders | Their own namespace | Write each change into every member's journal | One write per change instead of one per member |
+| Permissions | <Term id="relation-tuple">Relation tuples</Term> with inheritance, <Term id="consistency-token">consistency tokens</Term> | ACL copied to every file; walk ancestors | Sharing and moving are one write; the <Term id="new-enemy-problem">new enemy problem</Term> is solved by design |
+| Durability | Replicate hot, erasure-code warm (≈ 2.1×) | Three copies of everything | Saves about 1.8 EB of disk; costs repair traffic and slower reads of old data |
+| Garbage collection | <Term id="mark-and-sweep">Mark-and-sweep</Term> with grace and tombstones | Reference counting | Counts race with concurrent uploads and delete live blocks |
+| <Term id="deduplication">Deduplication</Term> scope | Per user or organization | Global | Global dedup leaks whether a file exists; most savings are within a user anyway |
+</Tradeoffs>
+
+## Evolution
+
+Nobody should build the final design first, and many products should not build it at all.
+
+**Before v1: buy.** If file storage is a feature of your product rather than the product, store files in a cloud object store behind your own permissions, or integrate with an existing drive through its API. Everything in this chapter is the cost of making storage and sync the product.
+
+**v1 (first million users, a small team).** One region. A relational database for metadata, with `namespace_id` on every table from day one so it can be sharded later. A cloud object store for blocks. Fixed 4 MB blocks with block-level dedup within a user, because content addressing is cheap to build early and very hard to retrofit. Clients poll the changes endpoint every minute. Permissions as rows on files and folders, checked by walking up the tree.
+
+**v2 (tens of millions).** The <Term id="change-journal">journal</Term>-and-<Term id="sync-cursor">cursor</Term> API with a sync service sending hints, because polling has become the largest source of load. Shard the metadata by <Term id="namespace">namespace</Term>. <Term id="content-defined-chunking">Content-defined chunking</Term> in the desktop client. Shared folders as namespaces. A permission service with <Term id="relation-tuple">tuples</Term> and caching, as folder-walking reads start to dominate.
+
+**v3 (hundreds of millions and beyond).** The blob store becomes the dominant cost, and an in-house store with hot and warm tiers and <Term id="erasure-coding">erasure coding</Term> pays for its engineering team many times over. Multi-region homing, <Term id="consistency-token">consistency tokens</Term> for permissions, pre-flattened groups, residency controls, and the full garbage-collection safety net.
+
+## Summary
+
+<Figure
+  id="summary-recap"
+  src="./figures/high-level-design.svg"
+  alt="The high-level design again: clients, API gateway, block service and blob store for bytes, metadata service and sharded metadata store for the tree and journal, permission service for every check, sync service sending hints, and workers behind the change stream."
+  caption="The final design. Bytes, metadata, sync, and permissions scale separately."
+  width="wide"
+/>
+
+<FigRef id="summary-recap" /> is the design we arrived at, and these are the ideas that hold it together:
+
+- **Metadata is the hard part, bytes are the expensive part.** 700k strongly consistent requests per second over 500 TB of rows, versus 2 EB of immutable blocks whose main problem is cost.
+- **A version is a list of <Term id="content-addressed-storage">content-addressed</Term> blocks.** Edits upload only changed blocks, retries are small, versions share storage, and <Term id="content-defined-chunking">content-defined chunking</Term> keeps insertions cheap.
+- **The commit is one transaction on one shard:** revision, head pointer, quota, and <Term id="change-journal">journal</Term> entry change together, so no one ever sees half a file.
+- **Sync is a journal plus <Term id="sync-cursor">cursors</Term>.** Push hints make it fast, pulls make it correct, and the client's three trees tell it which side changed.
+- **Conflicts keep both copies.** <Term id="optimistic-concurrency">Optimistic concurrency</Term> detects them; nothing is merged or discarded automatically.
+- **Permissions are <Term id="relation-tuple">relation tuples</Term>.** Inheritance and sharing are single writes, and <Term id="consistency-token">consistency tokens</Term> stop a removed user from seeing what came after.
+- **Durability is replication while hot and <Term id="erasure-coding">erasure coding</Term> when warm**, at about 2.1× overhead, with repair traffic planned like any other load.
+- **Garbage collection is slow on purpose**, because it is the only component that can destroy acknowledged data on its own.

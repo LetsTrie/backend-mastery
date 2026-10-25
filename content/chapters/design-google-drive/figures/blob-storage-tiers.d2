@@ -1,0 +1,14 @@
+...@../../../_shared/d2/base
+
+direction: right
+
+blocks: Block service {class: service}
+hot: "Hot tier, last ~30 days\nopen 1 GB volumes\n3 copies across zones" {class: blob}
+warm: "Warm tier, everything older\nReed-Solomon (10, 4) per region\n+ XOR across regions ≈ 2.1×" {class: datastore}
+scrubber: Scrubber {class: job}
+
+blocks -> hot: "① write"
+hot -> warm: "② seal, encode" {class: focus}
+warm -> blocks: "③ read older files" {class: async}
+scrubber -> hot: "verify" {class: async}
+scrubber -> warm: "verify, rebuild" {class: async}

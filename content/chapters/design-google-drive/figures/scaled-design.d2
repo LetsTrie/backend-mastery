@@ -1,0 +1,34 @@
+...@../../../_shared/d2/base
+
+direction: down
+
+cdn: "CDN (public links)" {class: external}
+
+r1: "Region A: users homed here" {
+  class: boundary
+  gw: API gateway {class: gateway}
+  svc: "Block, metadata, sync,\npermission services" {class: service}
+  meta: "Metadata shards: A's\nnamespaces + replica of B's" {class: datastore}
+  hot: "Hot tier (3 zones)" {class: blob}
+  gw -> svc
+  svc -> meta
+  svc -> hot
+}
+
+r2: "Region B: users homed here" {
+  class: boundary
+  gw: API gateway {class: gateway}
+  svc: "Block, metadata, sync,\npermission services" {class: service}
+  meta: "Metadata shards: B's\nnamespaces + replica of A's" {class: datastore}
+  hot: "Hot tier (3 zones)" {class: blob}
+  gw -> svc
+  svc -> meta
+  svc -> hot
+}
+
+warm: "Warm tier, erasure coded across regions (≈ 2.1×)" {class: datastore}
+
+cdn -> r1.gw
+cdn -> r2.gw
+r1.hot -> warm: "seal, encode" {class: focus}
+r2.hot -> warm: "seal, encode" {class: focus}

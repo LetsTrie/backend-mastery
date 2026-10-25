@@ -1,0 +1,16 @@
+...@../../../_shared/d2/base
+
+direction: down
+
+uploaded: uploaded {class: state}
+referenced: referenced {class: state}
+unreferenced: "unreferenced\n(timestamped)" {class: state}
+swept: "swept\n(tombstoned volume)" {class: state}
+reclaimed: reclaimed {class: state}
+
+uploaded -> referenced: "commit uses it"
+uploaded -> unreferenced: "session expired"
+referenced -> unreferenced: "mark: unused"
+unreferenced -> referenced: "re-referenced" {class: focus}
+unreferenced -> swept: "grace elapsed"
+swept -> reclaimed: "retention elapsed"

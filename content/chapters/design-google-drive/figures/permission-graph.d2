@@ -1,0 +1,16 @@
+...@../../../_shared/d2/base
+
+direction: down
+
+deck: "file:deck" {class: blob}
+q3: "folder:q3" {class: blob}
+planning: "folder:planning" {class: blob}
+finance: "group:finance" {class: actor}
+alice: "user:alice" {class: actor}
+link_share: "anyone with link" {class: external}
+
+deck -> q3: "parent" {class: focus}
+q3 -> planning: "parent" {class: focus}
+planning -> finance: "editor" {class: focus}
+finance -> alice: "member" {class: focus}
+q3 -> link_share: "viewer"

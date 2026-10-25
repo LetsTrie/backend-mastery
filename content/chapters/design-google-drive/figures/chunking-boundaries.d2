@@ -1,0 +1,34 @@
+...@../../../_shared/d2/base
+
+grid-columns: 2
+grid-gap: 48
+
+fixed: "Fixed-size blocks: all 4 change" {
+  class: boundary
+  grid-rows: 2
+  grid-columns: 4
+  grid-gap: 16
+  a1: "A" {class: blob}
+  b1: "B" {class: blob}
+  c1: "C" {class: blob}
+  d1: "D" {class: blob}
+  a2: "A′" {class: focus}
+  b2: "B′" {class: focus}
+  c2: "C′" {class: focus}
+  d2: "D′" {class: focus}
+}
+
+cdc: "Content-defined: only 1 changes" {
+  class: boundary
+  grid-rows: 2
+  grid-columns: 4
+  grid-gap: 16
+  a1: "A" {class: blob}
+  b1: "B" {class: blob}
+  c1: "C" {class: blob}
+  d1: "D" {class: blob}
+  a2: "A′" {class: focus}
+  b2: "B" {class: blob}
+  c2: "C" {class: blob}
+  d2: "D" {class: blob}
+}

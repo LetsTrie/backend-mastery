@@ -1,0 +1,21 @@
+...@../../../_shared/d2/base
+
+shape: sequence_diagram
+
+client: Desktop client {class: client}
+blocks: Block service {class: service}
+blob: Blob store {class: blob}
+meta: Metadata service {class: service}
+store: Metadata store {class: datastore}
+
+client -> client: "chunk, hash 3 blocks"
+client -> blocks: "① which of these 3 are missing?"
+blocks -> client: "missing: b71e"
+client -> blocks: "② PUT b71e (resumable)"
+blocks -> blocks: "recompute SHA-256"
+blocks -> blob: "write bytes, index hash"
+client -> meta: "③ commit, base rev_41"
+meta -> meta: "permission check"
+meta -> store: "④ one transaction" {class: focus}
+store -> meta: "rev_42, journal 18235"
+meta -> client: "201 Created"

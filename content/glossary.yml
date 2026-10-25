@@ -197,3 +197,95 @@ short-code:
 toll-free-number:
   term: Toll-free number
   definition: A 10-digit number with a toll-free prefix such as 800 or 888, usable for business texting after verification. Cheaper and quicker to get than a short code, but much slower to send from by default.
+
+namespace:
+  term: Namespace
+  definition: A self-contained tree of files with its own owner and change history, such as one user's My Drive, one shared folder, or one shared drive. Changes inside a namespace are ordered; the namespace is also the unit we shard by.
+
+durability-nines:
+  term: Durability ("nines")
+  definition: The probability that stored data survives a year without loss. 99.999999999% ("eleven nines") means that out of 100 billion stored objects, about one is expected to be lost per year.
+
+read-your-writes:
+  term: Read-your-writes consistency
+  definition: A guarantee that once a client's write succeeds, that same client's later reads always see it, even if other clients may briefly see older data.
+
+new-enemy-problem:
+  term: New enemy problem
+  definition: The failure where a permission check uses stale access rules and lets in someone who was just removed, for example seeing a file added after their access was revoked. Named in Google's Zanzibar paper.
+
+resumable-upload:
+  term: Resumable upload
+  definition: An upload split into pieces under one session, so that after a dropped connection the client asks how much arrived and sends only the rest, instead of starting over.
+
+content-addressed-storage:
+  term: Content-addressed storage
+  definition: Storing each piece of data under the hash of its own bytes. Identical content gets the same address, so it is stored once, and any corruption is detectable because the bytes no longer match their name.
+
+blocklist:
+  term: Blocklist
+  definition: The ordered list of block hashes that makes up one version of a file. Reassembling the blocks in that order reproduces the file exactly.
+
+content-defined-chunking:
+  term: Content-defined chunking (CDC)
+  definition: Splitting a file at boundaries chosen by its content (where a rolling hash of the last few bytes matches a pattern) instead of at fixed offsets, so an insertion only changes the chunks around it.
+
+rolling-hash:
+  term: Rolling hash
+  definition: A hash over a sliding window of bytes that can be updated in constant time as the window moves forward one byte, which makes it cheap to evaluate at every position in a file.
+
+change-journal:
+  term: Change journal
+  definition: An append-only, numbered log of every change to a namespace. Clients catch up by asking for all entries after the last number they processed.
+
+sync-cursor:
+  term: Sync cursor
+  definition: A device's bookmark into a change journal, the number of the last change it has applied. Asking for changes after the cursor returns exactly what the device has missed.
+
+optimistic-concurrency:
+  term: Optimistic concurrency control
+  definition: Letting writers proceed without locks and checking at commit time that the data has not changed since they read it (for example, that the file's head revision is still the one they edited). If it has, the commit is rejected.
+
+merge-base:
+  term: Merge base
+  definition: The last state two copies agreed on. Comparing each copy with it tells you which side changed, which is what turns "these differ" into "this side edited, that side did not".
+
+conflicted-copy:
+  term: Conflicted copy
+  definition: A second file created when two edits to the same file collide, so that neither edit is lost; for example "Report (Alice's conflicted copy).docx". A person decides how to merge them.
+
+relation-tuple:
+  term: Relation tuple
+  definition: A permission fact of the form object, relation, subject, such as "folder:F has viewer group:eng". Access checks combine tuples, for example following a file to its parent folder and a group to its members.
+
+consistency-token:
+  term: Consistency token
+  definition: An opaque value returned by a write that later reads present to say "evaluate at a state at least this recent". Zanzibar calls it a zookie; it is how a permission check avoids using rules older than the content it protects.
+
+signed-url:
+  term: Signed URL
+  definition: A download or upload link that carries its own short-lived, tamper-proof authorization, so a storage server can serve it without calling back to the permission service.
+
+erasure-coding:
+  term: Erasure coding
+  definition: Splitting data into k pieces and computing m extra parity pieces so that any k of the k + m can rebuild it. Reed-Solomon (10, 4), for example, survives the loss of any 4 pieces at 1.4× the original size, versus 3× for three full copies.
+
+scrubbing:
+  term: Scrubbing
+  definition: Reading stored data in the background and checking it against its checksums to find silent corruption early, while enough healthy copies or parity remain to repair it.
+
+mark-and-sweep:
+  term: Mark-and-sweep garbage collection
+  definition: Finding garbage by first marking everything still referenced, then deleting only what was not marked, instead of trusting reference counts that can drift under concurrency.
+
+envelope-encryption:
+  term: Envelope encryption
+  definition: Encrypting data with a data key, then encrypting that data key with a key-encryption key held in a key-management service. Rotating or revoking the outer key never requires re-encrypting the data.
+
+crypto-shredding:
+  term: Crypto-shredding
+  definition: Deleting data by destroying the key it was encrypted with. Every copy, replica, and backup becomes unreadable at once, even ones that are physically removed later.
+
+hot-partition:
+  term: Hot partition
+  definition: One shard or partition that receives far more traffic than the others, usually because a single key is popular, so it saturates while the rest of the cluster sits idle.

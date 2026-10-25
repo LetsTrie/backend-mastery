@@ -1,0 +1,29 @@
+...@../../../_shared/d2/base
+
+direction: down
+
+laptop: "Laptop A" {class: client}
+phone: "Phone B" {class: client}
+gateway: API gateway {class: gateway}
+blocks: Block service {class: service}
+meta: Metadata service {class: service}
+perm: Permission service {class: service}
+blob: Blob store {class: blob}
+index: Block index {class: datastore}
+metastore: "Metadata store\n(by namespace)" {class: datastore}
+stream: Change stream {class: queue}
+sync: Sync service {class: service}
+workers: "Workers: thumbnails,\nsearch, GC" {class: job}
+
+laptop -> gateway: "① ② ③"
+phone -> gateway: "⑦ ⑧"
+gateway -> blocks: "① ② ⑧"
+gateway -> meta: "③ ⑦"
+blocks -> blob: "② bytes"
+blocks -> index: "② hash"
+meta -> perm: "③ check"
+meta -> metastore: "④ one transaction" {class: focus}
+metastore -> stream: "⑤" {class: async}
+stream -> sync {class: async}
+stream -> workers {class: async}
+sync -> phone: "⑥ hint" {class: async}

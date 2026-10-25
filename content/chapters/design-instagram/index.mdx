@@ -1,0 +1,1055 @@
+---
+slug: design-instagram
+kind: case-study
+title: Design Instagram
+subtitle: "How to store, process, and serve billions of photos and videos, and build a feed that opens in under a second"
+description: >-
+  Design Instagram: photo and video uploads, media processing, CDN delivery, a
+  hybrid fan-out home feed, sharded IDs, and like counters, with estimates.
+part: case-studies
+tags: [system-design, distributed-systems, news-feed, fan-out, media-storage]
+prerequisites: [caching, sharding-and-partitioning, unique-id-generation]
+status: review
+authors: [md-sakib-khan]
+reviewers: []
+updated: 2026-10-25
+references:
+  - title: "Designing Data-Intensive Applications"
+    authors: "Martin Kleppmann"
+    year: 2017
+    url: https://dataintensive.net/
+revisions: []
+---
+
+You take a photo at a concert, pick a filter, type a caption, and tap Share while the phone is down to one bar. A second later the post sits at the top of your profile. Within a minute it appears in the feeds of a few hundred friends, some of them on the other side of the world, each of whom sees it in under a second, sharp on their screen, at a size that fits their phone. Somebody likes it before you have put the phone away.
+
+It looks like the simplest product in the book: save a file, show a list. It is really three systems that pull in different directions. The first is a **media pipeline** that must accept a hundred million uploads a day over unreliable mobile networks, and turn each one into a set of images and videos sized for every screen. The second is a **delivery network** that sends out more than 300 bytes for every byte uploaded, which no fleet of application servers could afford to serve. The third is a **feed** that, for every one of hundreds of thousands of requests per second, must gather the newest posts from a couple of hundred accounts, rank them, and answer in under half a second, even when one of those accounts has a hundred million followers.
+
+We design a service like Instagram. Where Instagram or Meta have published how their systems work, we cite them, and that is often: the company has been unusually open about its IDs, its storage, its caches, and its ranking. Everything else is our own design and our own reasoning, and the numbers are our assumptions, not Instagram's.
+
+## Problem and scope
+
+People share photos and short videos with the accounts that follow them, and scroll through what the accounts they follow have shared. The clients are mobile apps and a web app, all using one public API. The platform covers:
+
+- Posts of a single photo, a short video, or a <Term id="carousel">carousel</Term> of up to 10 photos and videos, with a caption.
+- Following and unfollowing accounts. A **private account** approves each follower, and only approved followers can see its posts.
+- A <Term id="feed-ranking">ranked</Term> **home feed** of posts from the accounts you follow, and a **profile grid** of one account's posts, newest first.
+- Likes and comments, with their counts shown on every post.
+- Deleting a post, which removes it from every feed, profile, and media link.
+
+Stories, Reels, direct messages, Explore, and search reuse the building blocks of this chapter and get chapters of their own.
+
+## Requirements
+
+### Functional
+
+1. A user can upload a photo, a short video, or a <Term id="carousel">carousel</Term> with a caption. The author sees the new post on their own profile immediately, even while the media is still being processed.
+2. A user can follow and unfollow accounts. Following a private account sends a request the owner approves.
+3. A user's home feed shows recent posts from accounts they follow, <Term id="feed-ranking">ranked</Term> by predicted interest, one page at a time with <Term id="cursor-pagination">cursor pagination</Term>.
+4. A user's profile shows their posts, newest first.
+5. A user can like, unlike, and comment on posts, and every post shows its like and comment counts.
+6. An author can delete a post. It disappears from feeds and profiles at once, and its media links stop working within minutes.
+
+### Non-functional
+
+- **Scale:** 500M <Term id="dau">daily active users</Term>, 100M new posts a day, and about 350k feed requests per second at peak. Don't worry about where these numbers come from yet; the next section works them out step by step.
+- **Feed latency:** the feed API answers in under 500 ms at <Term id="p99">p99</Term>, measured at our servers. The first image of a page then comes from a nearby <Term id="cdn">content delivery network (CDN)</Term> server.
+- **Availability:** reading (feeds, profiles, media) is <Term id="availability-nines">99.99% available</Term> (≈ 53 min of downtime a year). Posting, liking, and following are 99.95% available (≈ 4.4 h a year): a few minutes when you cannot post is bad, but a few minutes when nobody can scroll is worse.
+- **Durability:** once the app shows "Shared", the photo or video survives the loss of any disk, server, or failure zone: its bytes are stored in three zones before the upload is acknowledged. It is copied to a second region within minutes, so losing a whole region can lose at most the last few minutes of uploads, which the phones still hold and can send again.
+- **Freshness and consistency:** feeds and counts are <Term id="eventual-consistency">eventually consistent</Term>: a new post reaches followers' feeds within 60 s at p99, and a like count may lag by a few seconds. The author's own actions have <Term id="read-your-writes">read-your-writes consistency</Term>: you always see your own post, like, or follow straight away.
+- **Privacy:** a private account's photos cannot be viewed by someone who is not an approved follower, even with a copied media link, once that link has expired.
+
+What is *not* on the list matters as much: a strictly chronological feed, exact like counts at every instant, and every follower seeing a new post at the same moment. Each would be expensive, and we will see why users do not need any of them.
+
+## Back-of-the-envelope estimation
+
+We size the system in six steps: traffic, the <Term id="fan-out">fan-out</Term> that posting causes, storage, processing, bandwidth, and the memory the feed needs. Each assumption sits right next to the calculation that uses it. The numbers are round on purpose; we want the right order of magnitude, not false precision.
+
+### Traffic
+
+Assume 500 million daily active users, and that one in five posts once a day.
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Posts per day | 500M users × 1 in 5 | 100M |
+| Average rate | 100M ÷ 86,400 seconds in a day | ≈ 1,160 per second |
+
+Usage bunches up in the evenings of the busiest time zones and around big events. Assume the peak is three times the average.
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Peak posts | 1,160 × 3 | ≈ 3.5k per second |
+
+Assume 80% of posts are photos and 20% are videos. A <Term id="carousel">carousel</Term> counts as one post here; we treat its extra items as part of the per-post averages below.
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Photo posts per day | 100M × 80% | 80M |
+| Video posts per day | 100M × 20% | 20M |
+
+Reading is far busier than posting. Assume each user opens the app 10 times a day and loads 2 pages of 20 posts each time.
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Feed requests per day | 500M users × 10 opens × 2 pages | 10B |
+| Average rate | 10B ÷ 86,400 | ≈ 116k per second |
+| Peak rate | 116k × 3 | ≈ 350k per second |
+| Feed requests per post | 10B ÷ 100M | 100 |
+
+Assume each user likes 20 posts and writes 2 comments a day.
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Likes per day | 500M × 20 | 10B |
+| Peak likes | 10B ÷ 86,400 × 3 | ≈ 350k per second |
+| Comments per day | 500M × 2 | 1B |
+| Peak comments | 1B ÷ 86,400 × 3 | ≈ 35k per second |
+
+Likes are as frequent as feed loads. They are tiny writes, but there are a hundred of them for every post, and that will shape the data model.
+
+### Fan-out
+
+Every new post must reach its author's followers. Assume an account has 200 followers on average. The average hides a very long tail: most accounts have a few dozen followers and a handful have hundreds of millions.
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Feed deliveries per day | 100M posts × 200 followers | 20B |
+| Average rate | 20B ÷ 86,400 | ≈ 230k per second |
+| Peak rate | 3.5k posts per second × 200 | ≈ 700k per second |
+
+Now take one account with 100 million followers.
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Deliveries for one post | 100M followers × 1 | 100M |
+| Time at the whole fleet's peak rate | 100M ÷ 700k per second | ≈ 143 seconds |
+
+**One post from one account could occupy every fan-out worker we own for over two minutes.** That single line is the <Term id="celebrity-problem">celebrity problem</Term>, and [Building the home feed](#home-feed) is about solving it.
+
+### Storage
+
+Photos and videos are stored very differently from everything else, so we size them separately.
+
+**Photos.** Instagram's apps upload photos at up to 1,080 pixels wide <Cite href="https://help.instagram.com/1631821640426723" title="Photo resolution on Instagram" author="Instagram Help Center" />. Assume the uploaded file, which we keep as the master copy, is about 1 MB. From it we produce four <Term id="rendition">renditions</Term>, 1,080, 640, 320, and 150 pixels wide, of roughly 300, 120, 40, and 10 KB: about 0.5 MB together.
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Per photo post | 1 MB master + 0.5 MB renditions | 1.5 MB |
+| Per day | 80M × 1.5 MB | 120 TB |
+
+**Videos.** Assume an average video lasts 30 seconds and is uploaded at about 5 megabits per second (Mbps). The renditions for different screens and network speeds, described in [The upload and media pipeline](#upload-pipeline), add about as much again.
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Uploaded master | 30 seconds × 5 Mbps ÷ 8 bits per byte | ≈ 19 MB, call it 20 MB |
+| Per video post | 20 MB master + 20 MB renditions | 40 MB |
+| Per day | 20M × 40 MB | 800 TB |
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| All media per day | 120 TB + 800 TB | 920 TB |
+| Video's share of the bytes | 800 ÷ 920 | ≈ 87% |
+| Per year, one copy | 920 TB × 365 | ≈ 336 PB |
+| Per year, three full copies | 336 PB × 3 | ≈ 1 EB |
+| Per year, <Term id="erasure-coding">erasure-coded</Term> at 2.1× | 336 PB × 2.1 | ≈ 705 PB |
+
+Two numbers here should make you stop. Video is a fifth of the posts and **87% of the bytes**, so any storage or delivery saving that ignores video ignores almost everything. And keeping three full copies of every file costs about 300 PB a year more than storing them with erasure coding at the 2.1× overhead Meta reports for its warm photo storage <Cite href="https://www.usenix.org/conference/osdi14/technical-sessions/presentation/muralidhar" title="f4: Facebook's Warm BLOB Storage System" author="Muralidhar et al." year="2014" />. [Serving media](#media-delivery) decides which copies are worth keeping.
+
+**Metadata.** Assume a post's row (ids, caption, location, media keys, timestamps) is about 1 KB, and a like is about 50 bytes: two 8-byte ids, a timestamp, and storage overhead.
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Post rows per day | 100M × 1 KB | 100 GB |
+| Post rows per year | 100 GB × 365 | 36.5 TB |
+| Likes per day, stored in two tables | 10B × 50 bytes × 2 | 1 TB |
+| Likes per year | 1 TB × 365 | ≈ 365 TB |
+
+Likes take ten times the space of the posts they belong to, partly because each like is stored twice, once for each way it is read (see [Data model](#data-model)). Metadata is still tiny next to media: a year of it is a few hundred terabytes, against hundreds of petabytes of photos and video.
+
+### Processing
+
+Every upload has to be decoded, resized, and re-encoded before anyone else sees it. Video dominates here too. When Instagram reworked its video pipeline, its example showed 86 seconds of CPU time to <Term id="transcoding">transcode</Term> a 23-second video to a single 720p rendition <Cite href="https://engineering.fb.com/2022/11/04/video-engineering/instagram-video-processing-encoding-reduction/" title="Reducing Instagram's basic video compute time by 94 percent" author="Ryan Peterman, Haixia Shi" year="2022" />: about 3.7 CPU-seconds per second of video, for one rendition.
+
+A video can be published as soon as it has **one playable rendition**; the rest of its renditions can follow later. So we size the two parts separately. Assume the first rendition costs about 4 CPU-seconds per second of video, the rest of the set about 4 more together (they are smaller), and a photo about half a CPU-second for all its sizes.
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| First rendition, per video | 30 seconds × 4 CPU-seconds | 120 CPU-seconds |
+| First renditions per day | 20M × 120 CPU-seconds | 2.4B CPU-seconds |
+| Cores, busy around the clock | 2.4B ÷ 86,400 | ≈ 28k cores |
+| Cores at the evening peak | 28k × 3 | ≈ 84k cores |
+| The rest of the renditions per day | the same 2.4B CPU-seconds | ≈ 28k cores on average |
+| Photo cores | 80M × 0.5 CPU-seconds ÷ 86,400 | ≈ 460 cores |
+
+Video takes about 98% of the processing. The first rendition sits on the path to publishing, so it must keep up with the peak: about 84k cores. The rest have no deadline. They wait in a low-priority queue and run in the troughs on the same machines, which outside the peak hours have tens of thousands of cores to spare. Doing all of the work before publishing, at the peak, would take twice as many cores, about 168k. Splitting "needed now" from "needed eventually" halves the video fleet.
+
+### Bandwidth
+
+**Uploads.** Each photo post sends its 1 MB master and each video its 20 MB master.
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Uploaded per day | 80M × 1 MB + 20M × 20 MB | 480 TB |
+| Average | 480 TB × 8 bits ÷ 86,400 | ≈ 44 gigabits per second (Gbps) |
+| Peak | 44 Gbps × 3 | ≈ 133 Gbps |
+
+**Downloads.** From the traffic assumptions, a user sees 10 opens × 2 pages × 20 posts = 400 posts a day. Assume 80% are photos, shown at the 1,080-pixel rendition of about 300 KB (most phones have high-density screens; see [API design](#api-design)), and 20% are videos, of which the viewer watches 15 seconds on average at 1.5 Mbps.
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Photos per user per day | 320 × 300 KB | 96 MB |
+| Video per user per day | 80 × 15 seconds × 1.5 Mbps ÷ 8 | ≈ 225 MB |
+| All users per day | 500M × 321 MB | ≈ 160.5 PB |
+| Average | 160.5 PB × 8 bits ÷ 86,400 | ≈ 14.9 terabits per second (Tbps) |
+| Peak | 14.9 Tbps × 3 | ≈ 45 Tbps |
+| Download to upload ratio | 160.5 PB ÷ 480 TB | ≈ 334 |
+| Media requests at peak | 500M × 400 ÷ 86,400 × 3 | ≈ 7M per second |
+
+We send about 334 bytes for every byte we receive, at a peak of 45 Tbps and 7 million requests a second. Both are upper bounds, because they count every view as a download; the cache on the phone, described in [Serving media](#media-delivery), serves repeat views without any network traffic. And the request count is a floor in another sense: a video is fetched as many small segments, not one file. No application server should touch these bytes. Media is served by a <Term id="cdn">CDN</Term> from servers near users, and our own servers only produce the URLs.
+
+### Feed memory
+
+The feed design in [Building the home feed](#home-feed) keeps a precomputed list of recent post ids for each active user. Assume 500 entries per user, each a 64-bit post id plus 8 bytes for the author id. Lists are kept for everyone active in the last 14 days, a somewhat larger group than the daily actives, so treat this as a floor.
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Per user | 500 × 16 bytes | 8 KB |
+| All daily active users | 500M × 8 KB | 4 TB |
+
+Four terabytes is a modest in-memory cache cluster. Holding every user's feed ready to read is affordable; what is less clearly affordable is *writing* 700k entries a second into it, which is the fan-out number from above.
+
+## API design
+
+The public API has three families of calls: uploading media, creating and reading posts, and the small social actions (like, comment, follow). All of them take the user's access token, and all ids are 64-bit integers sent as **strings** in JSON. JavaScript numbers lose precision above 2⁵³ <Cite href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_SAFE_INTEGER" title="Number.MAX_SAFE_INTEGER" author="MDN Web Docs" />, and our ids, described in [IDs and hot counters](#ids-and-counters), pass that value about 12 days after their epoch.
+
+### Upload media
+
+Uploading is separate from posting. The app starts uploading as soon as the user picks a photo, while they choose a filter and type a caption, so by the time they tap Share most of the bytes are already on our side.
+
+```http title="Start an upload session"
+POST /v1/uploads
+Authorization: Bearer <user token>
+Content-Type: application/json
+
+{ "kind": "video", "content_type": "video/mp4", "size_bytes": 19922944, "sha256": "9f2c41d0e7b5a8c3f61e2d4b7a90c5e8d3f1a6b2c7e4d9f0a3b8c5e1d6f2a7b4" }
+```
+
+```http title="Response"
+HTTP/1.1 201 Created
+Content-Type: application/json
+
+{ "upload_id": "480345459786991704", "upload_url": "https://upload.example.com/u/480345459786991704", "expires_at": "2026-10-26T18:04:00Z" }
+```
+
+The app then sends the bytes to `upload_url` in chunks, each a `PATCH` carrying its starting `Upload-Offset`. If the connection drops, a `HEAD` on the same URL returns the offset the server already has, and the app continues from there. This is the core of the tus <Term id="resumable-upload">resumable upload</Term> protocol <Cite href="https://tus.io/protocols/resumable-upload" title="Resumable upload protocol 1.0" author="tus" />, and it is the same mechanism the [Google Drive chapter](/chapters/design-google-drive#chunked-upload) builds on. The `sha256` lets the upload service verify that the bytes it assembled are the bytes the phone meant to send.
+
+### Create a post
+
+```http title="Request"
+POST /v1/posts
+Authorization: Bearer <user token>
+Idempotency-Key: 2f7c9a3e-5b1d-4e8a-9c6f-0d2b4a7e1c93
+Content-Type: application/json
+
+{
+  "media": ["480345459786991704", "480345484952815918"],
+  "caption": "Front row, finally",
+  "location_id": "212988663"
+}
+```
+
+```http title="Response"
+HTTP/1.1 201 Created
+Content-Type: application/json
+
+{ "post_id": "480345719833839621", "state": "processing" }
+```
+
+- **`201 Created`, with a state.** The post exists from this moment and appears on the author's own profile, but its media may still be processing, so followers do not see it yet. When processing finishes, the post moves to `published` and the feed machinery takes over. If any of its media is rejected, the post moves to `failed` instead, and the app tells the author why.
+- **`Idempotency-Key`.** A phone on a bad network often sends a request, loses the response, and sends it again. The key makes the retry return the same `post_id` instead of creating a second post. The general technique gets its own chapter in Building blocks.
+- **Media by reference.** The post names upload ids (an upload id is also the media id), not bytes, so a retried `POST /v1/posts` never re-sends a 20 MB video.
+
+### Read feeds and profiles
+
+```http title="Request"
+GET /v1/feed?limit=20&cursor=eyJzIjoiZjhhMiIsIm8iOjIwfQ
+Authorization: Bearer <user token>
+```
+
+```json title="Response"
+{
+  "items": [
+    {
+      "post_id": "480345719833839621",
+      "author": { "user_id": "52469174371567633", "username": "ana.lens" },
+      "caption": "Front row, finally",
+      "created_at": "2026-10-25T18:01:12Z",
+      "media": [
+        {
+          "kind": "photo",
+          "width": 1080,
+          "height": 1350,
+          "placeholder": "LKO2?U%2Tw=w]~RBVZRi};RPxuwH",
+          "renditions": [
+            { "width": 1080, "url": "https://media.example-cdn.com/m/9a41c2e7/1080.jpg?exp=1792994400&sig=4f1d" },
+            { "width": 640, "url": "https://media.example-cdn.com/m/9a41c2e7/640.jpg?exp=1792994400&sig=8c2a" }
+          ]
+        }
+      ],
+      "like_count": 1832,
+      "comment_count": 41,
+      "viewer_has_liked": false
+    }
+  ],
+  "next_cursor": "eyJzIjoiZjhhMiIsIm8iOjQwfQ"
+}
+```
+
+Three details in this response carry design decisions:
+
+- **The client picks the <Term id="rendition">rendition</Term>.** The server lists the sizes; the app picks the smallest one at least as wide as the image will appear on screen, counting the screen's pixel density. A phone showing a photo 390 points wide on a 3× display asks for 1,080 pixels; the same phone's profile grid asks for 320.
+- **Media URLs are signed and expire.** Anyone can copy a URL, so the URL carries its own short-lived permission (`exp`, `sig`), checked by the <Term id="cdn">CDN</Term>. [Serving media](#media-delivery) explains why that matters for private accounts and deletes.
+- **The `placeholder`.** A few dozen characters that encode a blurred version of the photo, which the app draws instantly while the real image loads.
+
+The feed is <Term id="feed-ranking">ranked</Term>, so its cursor is not "posts older than X". It points into a ranked list the server built when the first page was requested; [Building the home feed](#home-feed) explains why. A profile is chronological, so its cursor is the last `post_id` seen: ids sort by time, as [IDs and hot counters](#ids-and-counters) shows.
+
+### The rest of the surface
+
+| Endpoint | Purpose |
+| --- | --- |
+| `HEAD`, `PATCH` on an `upload_url` | Ask for the current offset; append a chunk |
+| `GET /v1/users/{id}/posts?cursor=…&limit=24` | Profile grid, newest first |
+| `GET /v1/posts/{id}` | One post, for a shared link or a notification |
+| `DELETE /v1/posts/{id}` | Delete a post |
+| `PUT /v1/posts/{id}/likes/me` | Like; repeating it changes nothing |
+| `DELETE /v1/posts/{id}/likes/me` | Unlike; repeating it changes nothing |
+| `POST /v1/posts/{id}/comments` | Comment, with an `Idempotency-Key` |
+| `GET /v1/posts/{id}/comments?cursor=…` | Comments, newest first |
+| `PUT /v1/users/{id}/followers/me` | Follow; returns `following` or `requested` for a private account |
+| `DELETE /v1/users/{id}/followers/me` | Unfollow, or cancel a request |
+
+Likes and follows are `PUT` and `DELETE` on a resource that either exists or does not ("my like on this post"). Doing either twice has the same effect as doing it once, so these calls need no <Term id="idempotency-key">idempotency key</Term>: the phone can retry freely. Creating a comment is different: two identical comments are two comments, so it takes a key like post creation does.
+
+## Data model
+
+The read and write paths come down to a short list of access patterns:
+
+1. Read 20 posts by id at once, to fill a feed page.
+2. List one user's posts, newest first, for a profile.
+3. List whom a user follows, and who follows a user.
+4. For 20 posts, tell whether the viewer has liked each one, on every feed page.
+5. Show each post's like and comment counts, on every feed page.
+6. Record a like (350k per second at peak) or a comment.
+7. Read and append to a user's precomputed feed.
+8. Find the <Term id="rendition">renditions</Term> of every photo and video in a post.
+
+<Figure
+  id="data-model"
+  src="./figures/data-model.svg"
+  alt="Five tables in the sharded relational store. Users keyed by user id. Posts keyed by post id, with an author id that points to a user. Post media keyed by post id and position, pointing to a post and to a media item. Media keyed by media id, with an owner id that points to a user, its kind, state, and storage key. Following keyed by follower id and followee id, both pointing to users. Each link is many rows to one."
+  caption="The relational tables. Each line joins a column to the key it refers to: crow's foot for many rows, double bar for exactly one. A followers table, not shown, mirrors following with the two ids swapped."
+  width="wide"
+/>
+
+The tables live in three kinds of store, chosen by how they are used. <FigRef id="data-model" /> shows the relational ones.
+
+**Users, posts, media, and the follow graph go in a sharded relational database.** These rows are small, read constantly, and written at a modest rate: 3.5k posts per second at peak, far below a likes-sized write load. They benefit from what a relational database gives for free: a post and its `post_media` rows are created in one transaction, a username is unique, and a profile is an index range scan. Instagram took this route, sharding PostgreSQL rather than moving to a NoSQL store <Cite href="https://instagram-engineering.com/sharding-ids-at-instagram-1cf5a71e5a5c" title="Sharding & IDs at Instagram" author="Instagram Engineering" year="2012" />.
+
+**The shard key is the user.** All of one user's rows, their account, posts, media, and the list of accounts they follow, live in the same <Term id="logical-shard">logical shard</Term>, so a profile page and post creation touch one database. A post's id embeds the number of its author's shard, so given only a `post_id`, the service knows which shard to ask without a lookup table. [IDs and hot counters](#ids-and-counters) shows how.
+
+**The follow graph is stored twice.** "Whom does Ana follow?" is answered by `following`, kept on Ana's shard. "Who follows Ana?" is answered by `followers`, kept on Ana's shard too, but filled with rows written when *other* users follow her. When Ben follows Ana, the row in Ben's `following` and the row in Ana's `followers` live on two different shards, so they cannot be written in one transaction. We write Ben's `following` row first, as the source of truth, and publish an event that writes Ana's `followers` row; a periodic repair job compares the two for drift. Meta's TAO handles its inverse edges the same way: it does not make the two writes atomic, and an edge left without its inverse after a failure is repaired by an asynchronous job <Cite href="https://www.usenix.org/conference/atc13/technical-sessions/presentation/bronson" title="TAO: Facebook's Distributed Data Store for the Social Graph" author="Nathan Bronson et al." year="2013" />.
+
+**Likes, comments, and feeds go in a <Term id="wide-column-store">wide-column store</Term>.** They are written a hundred times more often than posts, almost never updated, and always read by a known key. Instagram has run Cassandra for Feed, Direct messages, and fraud detection since 2012 <Cite href="https://instagram-engineering.com/open-sourcing-a-10x-reduction-in-apache-cassandra-tail-latency-d64f86b43589" title="Open-sourcing a 10x reduction in Apache Cassandra tail latency" author="Instagram Engineering" year="2018" />. <FigRef id="engagement-tables" /> shows these tables.
+
+<Figure
+  id="engagement-tables"
+  src="./figures/engagement-tables.svg"
+  alt="Five tables in the wide-column store. Likes by post, keyed by post id and bucket, then user id. Likes by user, keyed by user id, then post id. Comments by post, keyed by post id, then comment id, with an author id. Feed by user, keyed by user id, then post id, with an author id. Post counters, keyed by post id, with like and comment counts. Each table's post id points to a post and its user or author id points to a user, many rows to one."
+  caption="The wide-column tables. Across stores, the application keeps these links; nothing enforces them as foreign keys."
+/>
+
+- `likes_by_post` answers "who liked this post?" and makes a like idempotent: the key is the pair of post and user, so liking twice writes the same row. Its <Term id="partition">partition</Term> key adds a **bucket**, `hash(user_id) % 16`, so a post with ten million likes is spread over 16 partitions instead of growing one partition to hundreds of megabytes.
+- `likes_by_user` answers the question every feed page asks: "which of these 20 posts has the viewer liked?" It is one read of one partition, `user_id = ? AND post_id IN (…)`, instead of 20 reads of 20 posts' likes.
+- `feed_by_user` holds each active user's precomputed feed: post ids, newest first. Reads take the newest 500 (`LIMIT 500`); older entries are never read, and every entry expires 14 days after it is written, so the lists of users who stop opening the app delete themselves.
+- `post_counters` holds each post's like and comment counts, written in batches by the counter aggregator in [IDs and hot counters](#ids-and-counters).
+
+**Counts are stored, not counted.** Counting rows on every read (`SELECT count(*)` over ten million likes) is the alternative, and at 350k feed pages per second it is not one.
+
+**Two small sets support filtering.** `blocks`, the accounts a user has blocked, lives on the user's shard next to `following`. The posts a user has recently seen are kept as a set in the feed cache, filled from the app's view events and expiring after 14 days; losing it only means a user may see a post a second time.
+
+**Media bytes go in <Term id="object-storage">object storage</Term>,** keyed by media id and rendition. The `media` row holds the state machine and the list of renditions; the bytes are never in a database.
+
+<Tabs>
+  <Tab label="Relational (sharded)">
+
+```sql title="posts.sql (one copy per logical shard schema)"
+CREATE TABLE posts (
+  post_id     bigint PRIMARY KEY DEFAULT next_id(),
+  author_id   bigint NOT NULL,
+  caption     text,
+  location_id bigint,
+  state       text NOT NULL,  -- processing | published | failed | deleted
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX posts_by_author ON posts (author_id, post_id DESC);
+
+CREATE TABLE post_media (
+  post_id  bigint NOT NULL REFERENCES posts,
+  position smallint NOT NULL,
+  media_id bigint NOT NULL,
+  PRIMARY KEY (post_id, position)
+);
+
+CREATE TABLE following (
+  follower_id bigint NOT NULL,
+  followee_id bigint NOT NULL,
+  state       text NOT NULL,  -- active | requested
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (follower_id, followee_id)
+);
+```
+
+  </Tab>
+  <Tab label="Wide-column">
+
+```sql title="likes_and_feeds.cql"
+CREATE TABLE likes_by_post (
+  post_id    bigint,
+  bucket     smallint,  -- hash(user_id) % 16
+  user_id    bigint,
+  created_at timestamp,
+  PRIMARY KEY ((post_id, bucket), user_id)
+);
+
+CREATE TABLE likes_by_user (
+  user_id    bigint,
+  post_id    bigint,
+  created_at timestamp,
+  PRIMARY KEY ((user_id), post_id)
+) WITH CLUSTERING ORDER BY (post_id DESC);
+
+CREATE TABLE feed_by_user (
+  user_id   bigint,
+  post_id   bigint,
+  author_id bigint,
+  PRIMARY KEY ((user_id), post_id)
+) WITH CLUSTERING ORDER BY (post_id DESC)
+  AND default_time_to_live = 1209600;  -- 14 days
+```
+
+  </Tab>
+</Tabs>
+
+Because post ids sort by creation time, `ORDER BY post_id DESC` is "newest first" in every table, and a profile page or a feed list needs no separate timestamp column to sort on.
+
+## High-level design
+
+Start with the simplest thing that could work, shown in <FigRef id="naive-design" />: one web application and one database. The upload handler saves the file to disk and makes the thumbnails before it answers; the feed is a join.
+
+<Figure
+  id="naive-design"
+  src="./figures/naive-design.svg"
+  alt="A mobile app sends uploads and feed requests to a single web application. The web application resizes media inside the request and saves files on its local disk, and builds the feed with a join query over the follows and posts tables in one PostgreSQL database. The media download path through the web application is highlighted as failing."
+  caption="The naive design. Bytes, processing, and the feed query all go through one application and one database."
+/>
+
+```sql title="The naive feed query"
+SELECT p.*
+FROM posts p
+JOIN follows f ON f.followee_id = p.author_id
+WHERE f.follower_id = $1
+ORDER BY p.created_at DESC
+LIMIT 20;
+```
+
+It is a fine first week. Against our estimates it fails in five ways:
+
+1. **Bytes go through the application.** 133 Gbps in and up to 45 Tbps out at peak. The application servers would spend their lives copying files, and a user on a slow phone network holds a request thread for the whole download.
+2. **Processing happens inside the request.** A 30-second video needs about 240 CPU-seconds of <Term id="transcoding">transcoding</Term> for its full set of <Term id="rendition">renditions</Term>. The phone times out long before that, and meeting every evening peak inside requests would take about 168k cores.
+3. **The feed query stops being one query.** Once posts are sharded by author, a user's 200 followees live on up to 200 different shards. Every feed load becomes a scatter-gather to all of them, and at 350k feed loads a second that is tens of millions of shard queries a second, each paying for the slowest shard.
+4. **Likes need their own home.** 350k writes a second will not fit in the same database as everything else.
+5. **One disk is one failure away from losing photos.** The durability requirement rules out anything that keeps a single copy.
+
+The fix separates the three systems from the introduction: media moves on its own path, posts flow through events, and the feed is prepared before anyone asks for it. <FigRef id="high-level-design" /> shows the design we refine in the rest of the chapter.
+
+<Figure
+  id="high-level-design"
+  src="./figures/high-level-design.svg"
+  alt="The mobile app uploads media chunks to the upload service, which stores the original in object storage and emits an event to the media queue. Media processors read it, write renditions back to object storage, and tell the post service the media is ready. The app creates the post through the API gateway and the post service, which writes to the sharded metadata store and publishes a post event. The fan-out service reads followers from the metadata store and writes the post id into followers' feeds in the feed store. The feed service reads the feed store, asks the ranking service to order candidates, and hydrates posts from the metadata store. The app downloads renditions from the CDN, which fetches misses from object storage."
+  caption="High-level design. Numbers match the walkthrough below; the highlighted edge is the media path that never touches our application servers."
+  width="wide"
+/>
+
+<Steps>
+1. The app uploads the media in chunks to the **upload service**, which verifies each chunk and assembles the file.
+2. The upload service stores the original in **<Term id="object-storage">object storage</Term>** under a new media id, records the media as `uploaded`, and acknowledges the upload.
+3. Through an <Term id="transactional-outbox">outbox</Term> written with that record, it publishes a `media.uploaded` event to the **media queue**.
+4. **Media processors** check the file, write its renditions to object storage, and tell the **post service** the media is ready.
+5. The app creates the post through the **API gateway** and the post service, which writes it to the sharded **metadata store** in the `processing` state.
+6. When all the post's media is ready, the post service marks the post `published` and appends a `post.published` event to the **post events** topic.
+7. The **<Term id="fan-out">fan-out</Term> service** pages through the author's followers in the metadata store and writes the post id into each active follower's feed list in the **feed store**.
+8. When a follower opens the app, the **feed service** reads their feed list, asks the **<Term id="feed-ranking">ranking</Term> service** to order the candidates, and <Term id="feed-hydration">hydrates</Term> the first page from the metadata store and caches.
+9. The app downloads the renditions from the **<Term id="cdn">CDN</Term>**, which fetches any it does not have from object storage.
+</Steps>
+
+Why this shape?
+
+- **Media never touches the application tier.** Uploads go to a service built to hold slow connections and verify bytes; downloads go to the CDN. Our application servers handle requests measured in kilobytes, not megabytes.
+- **Slow work happens behind a queue.** The upload is acknowledged as soon as the bytes are durable. Transcoding a video takes as long as it takes, and the queue absorbs the evening peak instead of the CPU fleet.
+- **Posting and fan-out are decoupled by an event.** The post service does not know or care how many followers the author has. A celebrity's post costs the post service exactly what anyone else's does; the fan-out service decides what to do with it.
+- **The feed is mostly precomputed.** A feed request reads one list instead of querying 200 authors. [Building the home feed](#home-feed) adds the exceptions.
+- **Each store matches its access pattern:** relational for posts and the graph, <Term id="wide-column-store">wide-column</Term> for likes and feeds, object storage for bytes, caches in front of all of them.
+
+## Deep dives
+
+### The upload and media pipeline [#upload-pipeline]
+
+**The problem.** At peak, 3.5k posts a second arrive from phones, many of them on mobile networks that drop out in elevators and tunnels. A video master is 20 MB. Every upload has to end up as a set of <Term id="rendition">renditions</Term> that look right on any screen, with nothing private left inside the file, before a single follower sees it. And the person posting expects the whole thing to feel instant.
+
+**Where do the bytes go?** There are two common shapes:
+
+1. **Through the API.** The app sends the file in the body of `POST /v1/posts`. Simple, but the request is as slow as the phone's uplink: tens of seconds for a video on a weak connection, holding an application server's request slot the whole time. A dropped connection at 90% means starting over.
+2. **Straight to storage.** The API hands the app a short-lived upload URL, and the bytes go to a service built for exactly this: holding many slow connections, accepting chunks, and verifying what arrives. The API only ever sees small JSON requests.
+
+We take the second, with **<Term id="resumable-upload">resumable chunks</Term>**. For a photo the whole master usually fits in one request. For a video, the app sends chunks and, after any interruption, asks for the current offset and continues from there, as the tus protocol defines <Cite href="https://tus.io/protocols/resumable-upload" title="Resumable upload protocol 1.0" author="tus" />. The [Google Drive chapter](/chapters/design-google-drive#chunked-upload) builds a fuller version of this for multi-gigabyte files; for a 20 MB video, plain offsets are enough.
+
+<Aside title="Chunk sizes and object storage limits">
+
+If the upload service writes chunks directly as parts of a multipart upload into a cloud object store, the store's rules leak into the client. Amazon S3, for example, requires every part except the last to be at least 5 MiB and allows at most 10,000 parts <Cite href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html" title="Amazon S3 multipart upload limits" author="Amazon Web Services" />. Five mebibytes is a long time to wait for an acknowledgment on a poor connection, so our upload service accepts smaller chunks from phones (around 1 MB) and assembles larger parts itself. The phone's chunk size is a mobile-network decision; the part size is a storage decision; the upload service keeps them apart.
+
+</Aside>
+
+**Make it feel instant.** Three things happen on the phone before any server is involved, and they matter more to perceived speed than anything on the server:
+
+- **Resize first.** The app scales the photo to at most 1,080 pixels wide and compresses it before upload, which is how Instagram's apps behave <Cite href="https://help.instagram.com/1631821640426723" title="Photo resolution on Instagram" author="Instagram Help Center" />. A 12-megapixel, 4 MB camera file becomes a 1 MB master: a quarter of the bytes on the slowest link in the system.
+- **Start early.** The upload starts when the user picks the media, not when they tap Share. Choosing a filter and typing a caption takes longer than uploading a photo, so by the time they tap Share, the bytes are usually already stored. If they abandon the post, the orphaned upload expires.
+- **Show your own post from the phone.** The app shows the new post on the author's profile from the local file the moment the server returns `201 Created`. That is how the author gets <Term id="read-your-writes">read-your-writes</Term> for the media while the server is still processing it.
+
+**Process after acknowledging, not before.** The upload service acknowledges as soon as the master is durably stored. Everything else runs in the background, as <FigRef id="upload-sequence" /> shows.
+
+<Figure
+  id="upload-sequence"
+  src="./figures/upload-sequence.svg"
+  alt="Sequence diagram. The mobile app opens an upload session with the upload service and sends chunks; the connection drops; the app asks for the current offset and sends the rest. The upload service stores the original in object storage, acknowledges the upload, and publishes a media uploaded event to the media queue. The app creates the post with an idempotency key and receives 201 with state processing. A media processor takes the event, reads the original, writes renditions, and tells the post service the media is ready; the post service marks the post published and emits a post published event."
+  caption="One upload, from the first chunk to a published post. The upload is acknowledged at step 5; everything after it runs behind the media queue."
+  width="wide"
+/>
+
+<Steps>
+1. The app opens an upload session with `POST /v1/uploads`, giving the size and a SHA-256 of the file.
+2. It sends chunks with `PATCH`. Halfway through, the connection drops.
+3. When the network returns, `HEAD` tells the app how many bytes arrived.
+4. The app sends the rest from that offset.
+5. The upload service checks the SHA-256, stores the master in <Term id="object-storage">object storage</Term> across zones, records the media as `uploaded` together with an <Term id="transactional-outbox">outbox</Term> row, and only then acknowledges.
+6. A relay publishes `media.uploaded` from the outbox to the media queue.
+7. Meanwhile the user taps Share, and the app sends `POST /v1/posts` with an <Term id="idempotency-key">idempotency key</Term> and the media ids. The post service answers `201 Created` with the state `processing`.
+8. A media processor takes the event, reads the master, and writes the first renditions: all of a photo's sizes, or a video's first playable rendition.
+9. It marks the media `ready`. Once every item in the post is ready, the post service marks the post `published` and emits `post.published`.
+</Steps>
+
+**What the processor does.** For every file, in this order:
+
+1. **Validate in a sandbox.** Decode the file in an isolated worker with strict limits on pixels, duration, and memory. A <Term id="decompression-bomb">decompression bomb</Term>, a tiny file that declares billions of pixels, should crash a disposable sandbox, not a processor host. Anything that fails moves the media to `rejected`.
+2. **Strip metadata.** Apply the camera's orientation to the pixels, then remove all <Term id="exif">EXIF metadata</Term>. A phone photo often records the GPS coordinates where it was taken; publishing a photo of your front door with its coordinates attached is a privacy failure we must prevent by default. If the user chose to tag a location, that is a separate, deliberate field on the post.
+3. **Check for known abuse imagery.** Compute a <Term id="perceptual-hash">perceptual hash</Term> and compare it with industry lists of known child sexual abuse material (see [Security and privacy](#security-and-privacy)). A match moves the media to `rejected` and starts a reporting workflow.
+4. **Make renditions.** For a photo: the four widths from the estimate, plus the tiny blurred placeholder. For a video: one playable rendition now, and the rest queued at low priority, as described below.
+5. **Publish.** Write the renditions, mark the media `ready`, and tell the post service.
+
+Photos and videos go to **separate queues and processor pools**. A photo takes half a CPU-second; a video takes minutes of CPU. On a shared queue, a burst of long videos would make photos wait behind them, which is <Term id="head-of-line-blocking">head-of-line blocking</Term>. Separate pools mean an evening surge of videos slows videos, and photos keep publishing within seconds.
+
+**Video renditions, and which ones are worth making.** A video is delivered with <Term id="adaptive-bitrate">adaptive bitrate (ABR) streaming</Term>: cut into short segments, each available at several resolutions and bitrates, so the player can step down when the network weakens instead of stalling. Every resolution in that ladder costs encoding time. Instagram describes two tiers <Cite href="https://engineering.fb.com/2022/11/04/video-engineering/instagram-video-processing-encoding-reduction/" title="Reducing Instagram's basic video compute time by 94 percent" author="Ryan Peterman, Haixia Shi" year="2022" />:
+
+- **Basic encodings** that every client can play, made for every video. Instagram found that more than 80% of its video compute went to these.
+- **Advanced encodings** that use newer compression for better quality at the same bitrate. They are expensive to make and, at the time, covered only 15% of watch time.
+
+Instagram cut the cost of the basic ABR encodings by 94% by building them from frames it had already encoded for another rendition, instead of <Term id="transcoding">transcoding</Term> the original again, and spent the savings on advanced encodings, increasing the watch time they cover by 33%. The general lesson for our design: **encode cheaply for every video, and spend expensive encoding where the watch time is.** Our design spends in three steps. The processor makes one playable rendition immediately, so the post can publish. The rest of the basic set comes from a low-priority queue that runs in the troughs, as sized in [Processing](#processing). And a later job adds advanced encodings to a video only once its view count shows it will be watched enough to repay the cost. That last step assumes views concentrate on a minority of videos and fall with age. Meta measured exactly that shape for photos, whose popularity depends heavily on their age <Cite href="https://www.cs.princeton.edu/~wlloyd/papers/fb-photo-caching-sosp13.pdf" title="An Analysis of Facebook Photo Caching" author="Qi Huang et al." year="2013" />; we assume videos behave the same way and measure it before tuning the threshold.
+
+**Every step is safe to repeat.** The media queue delivers at least once, and processors crash. Each rendition's storage key is derived from the media id and the rendition name, so a processor that crashes halfway and is restarted overwrites the same objects with the same bytes. Marking media `ready` is a conditional update from `processing`, so it happens once.
+
+**Publishing is decided in one place.** Whenever a post is created, and whenever one of its media items becomes `ready` or `rejected`, the post service runs the same transaction on the author's shard: lock the post row, read the state of all its media (on the same shard, since the author owns them), and move the post to `published` if every item is ready or to `failed` if any was rejected. Running the check from both triggers covers a photo that finishes before the post exists. The row lock means two <Term id="carousel">carousel</Term> items finishing in the same millisecond cannot each see the other as unfinished and leave the post stuck. A replayed event finds the post already `published`, `failed`, or `deleted` and changes nothing.
+
+**Nothing waits forever.** The `uploaded` record and its outbox row are written together, so a crash after the acknowledgment cannot lose the event. And a sweeper re-enqueues any media that has been `uploaded` or `processing` for more than ten minutes, so a processor that died holding an event delays a post instead of stranding it.
+
+<FigRef id="media-lifecycle" /> shows every state a piece of media can be in.
+
+<Figure
+  id="media-lifecycle"
+  src="./figures/media-lifecycle.svg"
+  alt="State machine for one media item. Created moves to uploading as chunks arrive, then to uploaded when the checksum matches. Uploaded moves to processing when a processor takes it. Processing moves to ready, or to rejected when the file is invalid or matches known abuse imagery. Ready moves to attached when a post that includes it is published. Created, uploading, uploaded, and ready media that no post claims within 24 hours move to expired, and its bytes are deleted. Attached media moves to deleted when the post is deleted, then to purged after a 30-day grace period."
+  caption="The media lifecycle. Every path ends in a recorded state, and nothing is stored forever without a post that owns it."
+  width="wide"
+/>
+
+**Clean up after people who change their minds.** Because uploads start before the user taps Share, some never become posts. Media that no post claims within 24 hours moves to `expired`, and a daily job deletes its bytes. At our volume this is not a rounding error. If even one upload in twenty is abandoned, that is 5M uploads a day and, since processing starts at upload, about 46 TB of masters and renditions a day that would otherwise be stored forever.
+
+<Aside title="Why not deduplicate identical uploads?">
+
+Storing each file under the hash of its bytes, as the Google Drive chapter does with <Term id="content-addressed-storage">content-addressed storage</Term>, would store a meme posted by ten thousand accounts once. We do not do it across users here, for two reasons. Our masters are re-encoded by each phone, so byte-identical uploads are rarer than they look. And cross-user deduplication leaks information: if uploading a file is suspiciously fast, an attacker learns that someone else already has that exact file. A media id per upload costs some storage and keeps every account's files independent, which also makes deleting one account's photo simple.
+
+</Aside>
+
+### Building the home feed [#home-feed]
+
+**The problem.** At peak, 350k times a second, someone opens the app and expects a page of the best recent posts from the 200 or so accounts they follow, in under 500 ms. A post should reach its author's followers within a minute. And a few accounts have a hundred million followers.
+
+There are two classic ways to build a feed, and the interesting design is the combination.
+
+**Option 1: <Term id="fan-out-on-read">fan-out on read</Term> (pull).** Keep each author's recent posts in a list. When a user opens the app, read the lists of everyone they follow, merge, and rank. Posting is free; reading does all the work.
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| List reads at peak | 350k feed requests per second × 200 followees | 70M per second |
+
+Seventy million reads a second is a lot, but they are cache reads of small lists, so the volume is not what kills this option. **The tail is.** A feed request must wait for the slowest of its 200 parallel reads. If each read is under 10 ms 99% of the time, the chance that all 200 are under 10 ms is 0.99²⁰⁰, about 13%. So in 87% of feed requests at least one read lands in the slowest 1%, and the feed's typical latency becomes the cache's worst-case latency. Pulling from 200 places makes the slow outliers the common case.
+
+**Option 2: <Term id="fan-out-on-write">fan-out on write</Term> (push).** Keep a precomputed feed list per user. When someone posts, write the new post's id into every follower's list. Reading is one lookup of one list.
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Feed writes at peak | 3.5k posts per second × 200 followers | 700k per second |
+| Feed reads at peak | 350k feed requests per second × 1 list | 350k per second |
+
+This is the model Twitter described for its home timelines: a <Term id="fan-out">fan-out</Term> service inserts each new tweet's id into the in-memory timeline of every follower <Cite href="https://www.infoq.com/presentations/Twitter-Timeline-Scalability" title="Timelines at Scale" author="Raffi Krikorian" year="2012" />. It moves work from the moment a user waits (reading) to a moment nobody waits (shortly after posting), and it reads one list instead of 200. It has three costs:
+
+1. **The celebrity post.** From the estimate: one post from a 100M-follower account is 100M writes, about 143 seconds of the entire fan-out fleet at its peak rate. Every other post published in those two minutes waits behind it.
+2. **Wasted writes.** Many followers will not open the app before the post is too old to show. Each write into their feed is work nobody reads.
+3. **Stale entries.** If the author deletes the post, or the reader unfollows the author, the entry is already sitting in the reader's list.
+
+**Push is cheaper per operation, pull is cheaper per burst.** Count operations per follower: push costs one write per *post*, while pull costs one read per *feed request*, about 20 a day for an active follower. So for an ordinary account, push does far less total work. For a celebrity the arithmetic changes in a different way: the 100M writes arrive as a single burst into 100M different keys, while the pull alternative is millions of reads of **one** small, hot list, which a cache serves almost for free.
+
+**Our choice: hybrid fan-out.** <FigRef id="feed-fanout" /> shows the split.
+
+<Figure
+  id="feed-fanout"
+  src="./figures/feed-fanout.svg"
+  alt="The post service publishes a post published event to the post events topic. The fan-out service reads it and checks the author's follower count. For authors below 100,000 followers, it pages through the followers list, keeps only followers active in the last 14 days, and writes the post id into each one's feed list in the feed store. For authors above the threshold, it writes nothing. Every feed service host also reads the post events topic and appends posts from large accounts to an in-memory list of their recent posts. The feed service reads both: the reader's own feed list and the recent posts of the large accounts the reader follows."
+  caption="Hybrid fan-out. Ordinary authors are pushed into followers' feeds; large authors are pulled at read time from a small list every feed server holds in memory."
+  width="wide"
+/>
+
+- **Accounts below a threshold are pushed.** Assume the threshold is 100k followers; it is a tuning knob, not a law. A post from an account at the threshold is 100k writes, about a seventh of a second of the fleet's peak rate.
+- **Only active followers are pushed to.** The fan-out service skips followers who have not opened the app in 14 days, the same window after which feed lists expire. Those users get their feed rebuilt by pull when they return (below).
+- **Accounts above the threshold are pulled.** Their posts are not written into anyone's feed. Each such account has a short recent-posts list, and the feed service merges in the lists of the large accounts the reader follows. Which accounts those are is a short per-user list, the reader's `following` rows whose followee is above the threshold, cached next to the feed list.
+
+The pulled side is small enough to keep everywhere. Assume a few hundred thousand accounts are above the threshold, and each list holds the last 20 post ids with their timestamps, 16 bytes each.
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| One account's list | 20 posts × 16 bytes | 320 bytes |
+| All large accounts | 300k accounts × 320 bytes | ≈ 96 MB |
+
+Ninety-six megabytes fits in the memory of every feed service host. Each host reads the `post.published` topic and keeps its own copy of the large accounts' lists. Assume a typical user follows about ten accounts above the threshold: merging them into a feed costs ten in-memory lookups, not ten network calls, and the <Term id="hot-key">hot key</Term> that would otherwise melt one cache node does not exist. A host that restarts rebuilds its copy before taking traffic, by replaying the last few days of the topic, which takes seconds. The count of large accounts is our assumption; the real number sets the table's size, so we measure it and size from that.
+
+<Aside title="Crossing the threshold">
+
+Accounts grow. When one crosses 100k followers, the fan-out service stops pushing its new posts, and the feed service starts pulling them. Entries that were pushed before the switch stay in followers' lists, so for a while a post may come from both sources; the merge removes duplicates by post id. An account that drops below the threshold switches back after it stays below for a few days, so an account hovering at the line does not flap between modes on every post.
+
+</Aside>
+
+**Reading a feed.** <FigRef id="feed-read-path" /> shows one request.
+
+<Figure
+  id="feed-read-path"
+  src="./figures/feed-read-path.svg"
+  alt="Sequence diagram. The mobile app asks the feed service for the feed. The feed service reads the user's feed list through the cache in front of the feed store, adds the recent posts of followed large accounts from its own memory, and filters out posts already seen, deleted, from unfollowed accounts, or from blocked accounts. It sends a few hundred candidates to the ranking service and receives them ordered. It saves the ranked list as a session snapshot in the feed cache, hydrates the first 20 posts with post data, counts, and the viewer's likes in batched reads, signs the media URLs, and returns the page with a cursor into the snapshot."
+  caption="One feed request. Ranking happens once per session; later pages read the saved snapshot."
+  width="wide"
+/>
+
+<Steps>
+1. The app sends `GET /v1/feed`.
+2. The feed service reads the user's feed list, up to 500 post ids, from the cache in front of the feed store.
+3. It adds the recent posts of the large accounts the user follows, from its own memory.
+4. It filters out posts the user has already seen, posts that were deleted, and posts from accounts the user has since unfollowed or blocked.
+5. It sends the remaining candidates, typically a few hundred, to the <Term id="feed-ranking">ranking</Term> service, which returns them in order.
+6. It saves the ranked list in the feed cache as a **session snapshot** for 30 minutes.
+7. It <Term id="feed-hydration">hydrates</Term> the first 20 posts: post rows, authors, counts, and the viewer's likes, in a few batched reads.
+8. It signs the media URLs and returns the page with a cursor that points into the snapshot.
+</Steps>
+
+**Deletes and unfollows are filtered at read time.** Scrubbing a deleted post out of every follower's feed list would be another fan-out, as large as the original. Instead, step 4 drops entries whose post is now `deleted` or whose author is no longer followed, and reads only ever take the newest 500 entries. The check costs one cached set lookup per candidate: the set of post ids deleted in the last two weeks, and the reader's own set of followees.
+
+**A returning user's list cannot be trusted.** The fan-out service stopped pushing to them after 14 days of inactivity, so their list, if any entries survive, is missing everything since. The feed service checks the user's last-active time rather than the list: past 14 days, the first request takes the slow path. It pulls the recent posts of every followee once, as in option 1, and writes the result as a fresh list. This path brings back the 200-way tail from option 1, so it runs with a deadline: posts from followees that answer within about 300 ms make the first page, and the rest are merged into the list in the background for the next one. It costs a few hundred milliseconds once, for a user who has been away two weeks, instead of a push to them every time any of their followees posted while they were gone.
+
+**Ranking.** Instagram's Feed ranks recent posts from accounts you follow, mixed with recommended posts, using thousands of signals. The most important, in rough order, are your own activity, information about the post (including how quickly others engage with it), information about the author, and your history with the author. The models predict how likely you are to spend a few seconds on a post, comment on it, like it, share it, or tap the author's profile <Cite href="https://about.instagram.com/blog/announcements/instagram-ranking-explained" title="Instagram Ranking Explained" author="Adam Mosseri" year="2023" />. We treat the ranking service as a box with a time budget, but the box has a well-known shape. Instagram's Explore system narrows billions of items to a short list in stages: <Term id="candidate-generation">candidate generation</Term>, a light first-stage model, a heavier model that scores only the 100 best, and a final pass of rules, such as not showing the same author several times in a row. Its first stage uses a <Term id="two-tower-model">two-tower model</Term> whose item side is computed ahead of time <Cite href="https://engineering.fb.com/2023/08/09/ml-applications/scaling-instagram-explore-recommendations-system/" title="Scaling the Instagram Explore recommendations system" author="Vladislav Vorotilov, Ilnur Shugaepov" year="2023" />. A home feed's candidate set is already small, a few hundred posts from accounts you follow, so the same pattern fits in one feed request: score all candidates with the light model, score the top 100 with the heavy one, apply the rules.
+
+**Rank once per session.** A ranked feed cannot be paged with "posts older than X": the order is not by time. Re-ranking for every page does not work either. Between page 1 and page 2, new likes change the scores, posts shift position, and the user sees one post twice and never sees another. So the first request saves the ranked list as a snapshot (step 6), and the cursor is the snapshot id and an offset. Pages 2, 3, and 4 read the snapshot and only hydrate. New posts appear when the user pulls to refresh, which starts a new session. The snapshot is short-lived and rebuildable: if it is lost, the next page request re-ranks and skips the posts the user has already seen.
+
+**Where the half-second goes.** The feed's <Term id="p99">p99</Term> target is 500 ms at our servers.
+
+| Stage | Typical | Budget at p99 |
+| --- | --- | --- |
+| Gateway: authenticate, route | 5 ms | 20 ms |
+| Read the feed list | 2 ms | 30 ms |
+| Merge large accounts' posts, from memory | under 1 ms | 5 ms |
+| Filter seen, deleted, unfollowed, blocked | 5 ms | 30 ms |
+| Rank a few hundred candidates in two stages | 60 ms | 200 ms |
+| Save the session snapshot | 2 ms | 20 ms |
+| Hydrate 20 posts in batched, parallel reads | 15 ms | 100 ms |
+| Sign media URLs | 1 ms | 5 ms |
+| Slack: pauses, retries | — | 90 ms |
+| Total | ≈ 90 ms | 500 ms |
+
+Ranking takes the largest share, so it gets a hard deadline. If the ranking service has not answered within its 200 ms, the feed service returns the candidates in reverse time order and marks the response as unranked. A chronological feed is a worse product than a ranked one, but it is a feed; the availability target is about showing posts, not about showing them in the best order.
+
+### Serving media [#media-delivery]
+
+**The problem.** At peak, apps ask for about 7 million media files a second, up to 45 Tbps, from phones all over the world, most of them on mobile networks. Every image must appear fast and sharp. A private account's photos must stay private, and a deleted photo must stop being served, even though the whole point of a <Term id="cdn">CDN</Term> is to keep copies we no longer control.
+
+**The bytes come from a CDN, and the CDN sits in front of a hierarchy.** <FigRef id="media-delivery" /> shows the path a media request takes.
+
+<Figure
+  id="media-delivery"
+  src="./figures/media-delivery.svg"
+  alt="The feed service gives the mobile app signed URLs. The app first checks its own device cache. On a miss it requests the signed URL from a CDN edge server near the user, which checks the signature and expiry and serves the file if it has it. Edge misses go to a regional origin shield cache, and shield misses go to the media origin service, which reads object storage: the hot tier of recent media, kept as three copies, or the warm tier of older media, erasure-coded. A tiering job moves media from the hot tier to the warm tier after 30 days."
+  caption="The media read path. Each layer exists to keep requests away from the one behind it; storage sees only what every cache missed."
+  width="wide"
+/>
+
+<Steps>
+1. The app looks in its **device cache**. Scrolling back up, reopening the app, or seeing the same post in a feed and on a profile never downloads it twice. On a miss, it requests the <Term id="signed-url">signed URL</Term> from the **CDN edge**, at a <Term id="pop">point of presence (PoP)</Term> near the user.
+2. The edge checks the URL's signature and expiry and serves the file if it has it; popular, recent media lives here. On a miss, it asks the **<Term id="origin-shield">origin shield</Term>**, a regional cache that all edges in a region fetch through, so a newly popular photo is read from storage once per region, not once per PoP.
+3. On a shield miss, the request reaches the **media origin**.
+4. The origin checks that the media still belongs to a live post, then reads it from storage: the hot tier for recent media, the warm tier for the rest.
+</Steps>
+
+How much each layer absorbs is not something to guess. Meta measured it for Facebook photos in 2013: browser caches served 65.5% of requests, the edge caches 20.0%, the origin cache 4.6%, and storage the remaining 9.9% <Cite href="https://www.cs.princeton.edu/~wlloyd/papers/fb-photo-caching-sosp13.pdf" title="An Analysis of Facebook Photo Caching" author="Qi Huang et al." year="2013" />. Our 7 million requests a second count every view, so they are what the apps ask for *before* the device cache, the same base as those percentages. If our traffic behaved the same way, about two-thirds would never leave the phone, about 2.4 million a second would reach CDN edges, and about 700k a second would reach storage. Two lessons follow. First, **the cache on the device is the largest layer**, so the app's cache size and its cache key are capacity decisions, not client details. Second, even with three layers of caching, **about a tenth of requests reach storage**, because a social network's media has a very long tail of old photos viewed once. That is why the bottom of the hierarchy is a storage system designed for reads, not a generic file server.
+
+<Aside title="Smarter eviction at the edge">
+
+The same study found that the cache eviction algorithm mattered as much as cache size. Simulating a segmented LRU policy (S4LRU) instead of the edge caches' first-in-first-out policy would have raised the edge <Term id="cache-hit-ratio">hit ratio</Term> from 59.2% to 67.7% at the same size, and the origin cache's from 33.0% to 46.9% <Cite href="https://engineering.fb.com/2014/02/20/web/an-analysis-of-facebook-photo-caching/" title="An Analysis of Facebook Photo Caching" author="Engineering at Meta" year="2014" />. Every point of cache hit ratio at the edge is traffic that does not cross the network to the origin, which at our volume is measured in terabits per second.
+
+</Aside>
+
+**Make every rendition URL cacheable forever.** A rendition never changes. If a user edits a photo, the edit is a new media item with a new id, and the post points to it. So each URL names one immutable object, and the CDN and the device can cache it for as long as they like. We serve renditions with `Cache-Control: public, max-age=31536000, immutable`. The `immutable` directive tells clients not to revalidate the file even when the user reloads <Cite href="https://www.rfc-editor.org/rfc/rfc8246" title="RFC 8246: HTTP Immutable Responses" author="P. McManus" year="2017" />. At millions of requests a second, a conditional "has this changed?" request for an object that never changes is pure waste.
+
+**Precompute a few sizes; let the client choose.** We make four photo widths at upload time, and the client picks one, as described in [API design](#api-design). The alternative is resizing on demand: the CDN asks an image service for any size a client requests and caches the result. That supports any screen without storing unused sizes, but it puts a resize on every cache miss, and with a long tail of old photos there are many misses. With a fixed, small set of sizes, precomputing costs 0.5 MB per photo and makes every miss a plain read. Serving a modern image format alongside JPEG is the same kind of trade: another set of renditions to store, in exchange for fewer bytes sent. Since we send over 300 bytes for every byte uploaded, saving on delivery usually wins.
+
+**Show something immediately.** A feed page should never be a column of grey boxes. Three techniques stack:
+
+- **The placeholder in the feed response.** A few dozen bytes that the app turns into a blurred version of the photo, drawn before any image request is made. The page has its shape and its colors instantly.
+- **Progressive images.** A <Term id="progressive-jpeg">progressive JPEG</Term> can be shown as soon as its first pass arrives and sharpens as the rest comes in. When Facebook's iOS app switched to progressive JPEG, it used about 10% less data and showed a good-quality image about 15% faster <Cite href="https://engineering.fb.com/2015/01/28/ios/faster-photos-in-facebook-for-ios/" title="Faster Photos in Facebook for iOS" author="Tomer Bar" year="2015" />.
+- **Prefetching.** While the user reads one page, the app fetches the media of the next few posts at the size it will display them. For videos it prefetches only the first segment of the lowest step it would start with, so prefetching does not spend the user's data plan on videos they scroll past.
+
+**Private accounts and deletes versus a CDN that keeps copies.** A CDN serves whatever it has cached to anyone who presents the URL. That conflicts with two requirements: a private account's photo must be visible only to approved followers, and a deleted post's media must stop working. Our post ids are <Term id="time-sortable-id">time-sortable</Term> and embed a shard number, so they are easy to guess; a URL built only from ids would protect nothing.
+
+So every media URL is a signed URL. The feed service, which has already checked that the viewer may see the post, signs the path and an expiry time with a key it shares with the CDN. The CDN edge checks the signature and the expiry before serving, and **excludes the signature from its cache key**, so one cached copy of a popular photo serves every viewer whose link is valid. A removed follower, a blocked user, or anyone who copied the link keeps access only until the link expires.
+
+The expiry is a trade-off. Short links protect privacy better, but each new signature is a new URL, and a browser's cache is keyed by the whole URL: a link re-signed every minute would never be served from the browser cache. We divide time into fixed six-hour windows and set each link's expiry to the end of the *next* window. Every viewer who loads the same photo in the same window gets the identical URL, so the browser cache works, and no link is ever issued with only seconds left to live. A link therefore lasts between six and twelve hours. The mobile apps go further and key their own cache by media id and size, ignoring the signature.
+
+**Deleting a post** then takes four steps:
+
+1. The post becomes a <Term id="tombstone">tombstone</Term> (`state = deleted`). The API stops returning it at once, and feeds filter it at read time.
+2. The feed service stops signing URLs for its media, so no new links are issued.
+3. We ask the CDN to purge every rendition of the media, by a tag attached to all of them. A still-valid link then misses at the edge and reaches the media origin, which answers `410 Gone` for media whose post is deleted, so the purge cannot be undone by the next request. In practice, the media stops loading within minutes.
+4. After a 30-day grace period, during which the author can restore the post, a job deletes the bytes from storage, and they disappear from backups on the backup schedule.
+
+**Where the bytes live.** Photo popularity depends heavily on age: most views of a post happen soon after it is published <Cite href="https://www.cs.princeton.edu/~wlloyd/papers/fb-photo-caching-sosp13.pdf" title="An Analysis of Facebook Photo Caching" author="Qi Huang et al." year="2013" />. So storage has two tiers, the same split the [Google Drive chapter](/chapters/design-google-drive#blob-storage) works through in detail. The **hot tier** holds recent media as three full copies across zones, which serves reads from any one disk and repairs quickly, plus an <Term id="erasure-coding">erasure-coded</Term> copy at about 1.4× in a second region, so a region loss does not lose them. The **warm tier** holds media older than about 30 days, erasure-coded at about 2.1× with the coding spread across data centers. Meta built exactly this pair for its photos. Haystack packs many photos into large files and keeps their locations in memory, so reading a photo takes one disk operation instead of several for file system metadata <Cite href="https://www.usenix.org/conference/osdi10/finding-needle-haystack-facebooks-photo-storage" title="Finding a Needle in Haystack: Facebook's Photo Storage" author="Doug Beaver et al." year="2010" />. f4 holds warm data with an effective replication factor of 2.1 or 2.8 instead of Haystack's 3.6, combining Reed-Solomon coding inside a data center with XOR coding across data centers <Cite href="https://www.usenix.org/conference/osdi14/technical-sessions/presentation/muralidhar" title="f4: Facebook's Warm BLOB Storage System" author="Muralidhar et al." year="2014" />.
+
+**Assume media moves to the warm tier after 30 days.** Using the first year's 336 PB:
+
+| Quantity | Calculation | Result |
+| --- | --- | --- |
+| Hot tier, 30 days of uploads | 920 TB × 30 | ≈ 28 PB |
+| Hot tier on disk, three copies plus 1.4× in a second region | 28 PB × 4.4 | ≈ 121 PB |
+| Warm tier, the rest of the year | 336 PB − 28 PB | ≈ 308 PB |
+| Warm tier on disk at 2.1× | 308 PB × 2.1 | ≈ 647 PB |
+| Total on disk after a year | 121 PB + 647 PB | ≈ 768 PB |
+| Saved against three copies of everything | 1,008 PB − 768 PB | ≈ 240 PB a year |
+
+The tiered layout uses about 240 PB less disk in its first year than three copies of everything, and it also survives the loss of a region, which three copies in one region do not.
+
+Video masters are the largest single item we keep: 400 TB a day of files that are almost never read again once encoded. We keep them, in the warm tier, because they are the input for encodings we have not invented yet: Instagram's advanced encodings were made later, for videos already uploaded.
+
+### IDs and hot counters [#ids-and-counters]
+
+**The problem.** Every post, user, media item, and comment needs an id that is unique across thousands of database shards, fits in 64 bits, and sorts by creation time, so that "newest first" is an index scan and a cursor is the last id seen. And every feed page shows like counts that 350k likes a second keep changing, some of them concentrated on a single celebrity post.
+
+**Generating ids.** The options, from simplest to ours:
+
+| Option | Unique across shards | Sorts by time | Size | Cost |
+| --- | --- | --- | --- | --- |
+| Database auto-increment | No, only within one database | Yes | 64 bits | A single database is a bottleneck and a single point of failure |
+| Random UUID (version 4) | Yes | No | 128 bits | Random inserts scatter across the index; ids do not sort |
+| UUID version 7 | Yes | Yes, to the millisecond | 128 bits | Twice the size of a 64-bit id in every index and every feed entry |
+| A central id service (Snowflake) | Yes | Yes | 64 bits | Another service to run and keep available on every write path |
+| Ids generated inside each shard | Yes | Yes | 64 bits | Needs a careful bit layout and correct clocks |
+
+UUID version 7, standardized in 2024, puts a millisecond timestamp in its leading bits, so it sorts by time <Cite href="https://www.rfc-editor.org/rfc/rfc9562" title="RFC 9562: Universally Unique IDentifiers (UUIDs)" author="K. Davis, B. Peabody, P. Leach" year="2024" />, and it is the right default for many systems today. We want 64 bits because ids are the bulk of our feed store: 500 entries for each of 500M users. Twitter built Snowflake, a service that hands out 64-bit, roughly time-sorted ids, when it began moving data from MySQL to Cassandra and sharded MySQL, neither of which could hand out ids across the whole system <Cite href="https://blog.x.com/engineering/en_us/a/2010/announcing-snowflake" title="Announcing Snowflake" author="Twitter Engineering" year="2010" />. Instagram took the last option and generates ids inside each PostgreSQL shard, with no extra service <Cite href="https://instagram-engineering.com/sharding-ids-at-instagram-1cf5a71e5a5c" title="Sharding & IDs at Instagram" author="Instagram Engineering" year="2012" />. We follow Instagram. <FigRef id="id-layout" /> shows the layout.
+
+<Figure
+  id="id-layout"
+  src="./figures/id-layout.svg"
+  alt="A 64-bit id split into three fields: 41 bits of milliseconds since a custom epoch, 13 bits of logical shard number from 0 to 8,191, and 10 bits of per-shard sequence from 0 to 1,023. Below, logical shards map to physical database servers: logical shards 0 to 255 live on database server 1, 256 to 511 on server 2, and so on."
+  caption="The 64-bit id. Its high bits sort it by time; its middle bits say which logical shard holds it, and a small map says which server holds that shard."
+  width="wide"
+/>
+
+- **41 bits of time:** milliseconds since our own epoch. 2⁴¹ milliseconds is about 69.7 years.
+- **13 bits of <Term id="logical-shard">logical shard</Term>:** 8,192 logical shards.
+- **10 bits of sequence:** a counter that wraps at 1,024, so each logical shard can create 1,024 ids per millisecond, about a million a second. We need 3.5k posts a second across all shards.
+
+```sql title="next_id.sql (one copy per logical shard schema)"
+CREATE SEQUENCE id_seq;
+
+CREATE FUNCTION next_id(OUT result bigint) AS $$
+DECLARE
+  our_epoch  bigint := 1735689600000;  -- 2025-01-01T00:00:00Z, in ms
+  shard_id   int    := 1234;           -- this schema's logical shard
+  seq_id     bigint;
+  now_millis bigint;
+BEGIN
+  SELECT nextval('id_seq') % 1024 INTO seq_id;
+  SELECT FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000) INTO now_millis;
+  result := (now_millis - our_epoch) << 23;
+  result := result | (shard_id::bigint << 10);
+  result := result | seq_id;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+**Every id says where it lives.** A new user is assigned a logical shard (at random, or the least loaded), and their user id is generated there, so it embeds that shard number. Their posts, media, and comments are generated on the same shard, so their ids embed it too. Given any id, `(id >> 10) & 8191` is its logical shard, and a small, cached map from logical shard to physical server finishes the lookup. Hydrating 20 feed posts groups the ids by server and sends one batched read to each.
+
+**Logical shards make growth a copy, not a reshard.** Each logical shard is a PostgreSQL schema, and many schemas live on each physical server: on day one, perhaps 32 servers holding 256 schemas each. When a server runs hot, we move some of its schemas to a new server: replicate them, briefly stop writes to them, switch the map, and resume. No id changes and no key is rehashed, because the logical shard number in every id stays the same; only the map entry moves. Instagram describes the same arrangement of several thousand logical shards, mapped in code to far fewer physical ones <Cite href="https://instagram-engineering.com/sharding-ids-at-instagram-1cf5a71e5a5c" title="Sharding & IDs at Instagram" author="Instagram Engineering" year="2012" />.
+
+<Aside title="Two ways this id can go wrong">
+
+If one shard creates more than 1,024 ids in one millisecond, the sequence wraps and two ids could collide. That is a million ids a second on one shard, far beyond our load, and the primary key constraint turns a collision into a failed insert that is retried, never into two rows with one id. The more realistic danger is the clock: if a server's clock steps backwards, it can reissue timestamps it has already used. We run time synchronization that slews the clock gradually rather than stepping it, alert on clock offset, and again rely on the primary key as the backstop.
+
+</Aside>
+
+**Counting likes.** Every feed page shows like and comment counts for 20 posts, so at peak we read 350k × 20 = 7M counts a second while 350k likes a second change them. Assume a celebrity post collects 1M likes in its first 10 minutes: about 1,700 likes a second on a single post.
+
+**Option 1: count on read.** `SELECT count(*)` over the post's likes on every view. Seven million counts a second, some over millions of rows. No.
+
+**Option 2: a counter updated in the same transaction as the like.** Store `like_count` next to the post, a deliberate <Term id="denormalization">denormalization</Term>, and increment it in the transaction that inserts the like row, so the two never disagree. Instagram describes exactly this for its like counts, with a cache in front <Cite href="https://instagram-engineering.com/instagration-pt-2-scaling-our-infrastructure-to-multiple-data-centers-5745cbad7834" title="Instagration Pt. 2: Scaling our infrastructure to multiple data centers" author="Instagram Engineering" year="2015" />. It is the right design while likes and posts share a database. For us it fails twice. Our likes live in the <Term id="wide-column-store">wide-column store</Term>, which offers no transaction across a like row and a counter row in another <Term id="partition">partition</Term>. And on a hot post, 1,700 transactions a second queue for the lock on one counter row. If each holds the lock for about a millisecond, the row tops out near 1,000 updates a second, and likes on the most-watched post in the world start timing out.
+
+**Option 3: count asynchronously, in batches.** The like row is the source of truth; the counter is derived from it. Our choice, shown in <FigRef id="like-counter" />.
+
+<Figure
+  id="like-counter"
+  src="./figures/like-counter.svg"
+  alt="The mobile app sends a like to the like service. The like service reads the viewer's likes by user to see whether the state changes, writes the like row to likes by post and likes by user, and publishes a like event to the like events topic, partitioned by post id. The counter aggregator consumes the topic, adds up the deltas for each post over one second, and applies one increment per post to the post counters table. The counter cache sits in front of post counters, and the feed service reads counts from it using leases. A reconciliation job periodically recounts recently active posts from likes by post and corrects the counter."
+  caption="Likes and counts. Each like is written once as a row; the count is derived from the rows in one-second batches, so a hot post costs one counter write per second."
+  width="wide"
+/>
+
+<Steps>
+1. The app sends `PUT /v1/posts/{id}/likes/me`.
+2. The like service reads `likes_by_user` to see whether this changes anything. A repeated like is acknowledged and goes no further.
+3. It writes the row to `likes_by_post` and `likes_by_user`.
+4. It publishes a `like` event (+1, or −1 for an unlike) to the like events topic, partitioned by `post_id`.
+5. The counter aggregator owns each post's events, because the topic is partitioned by `post_id`. It keeps a running count for each active post in memory, adds up each second's events, and writes the new total to `post_counters`, one write per post per second.
+6. The feed service reads counts through the counter cache.
+7. A reconciliation job recounts recently active posts from `likes_by_post` and corrects any drift.
+</Steps>
+
+A post with 1,700 likes a second now costs one counter write a second. The long tail costs more in total: at peak, the 350k likes in one second are spread over many posts. Assume they touch about 200k distinct posts. That is 200k counter writes a second; with three replicas at our planning figure of 15k writes per node (see [Scaling and bottlenecks](#scaling-and-bottlenecks)), 200k × 3 ÷ 15k ≈ 40 wide-column nodes. That is why the counters live in the wide-column store, not next to the posts in PostgreSQL. Writing totals rather than increments also makes a repeated write harmless. The count shown is a second or two behind, which nobody can see: large counts are displayed rounded ("1.2M likes"), and the viewer's own like shows instantly, because the app updates its heart and count locally and `viewer_has_liked` comes from the viewer's own `likes_by_user` row, which read-your-writes covers.
+
+**The counter is allowed to drift, and is corrected.** Two simultaneous likes from the same user on two devices can both pass the check in step 2, and a replayed event after an aggregator crash can apply twice. Rather than pay for a distributed transaction on 350k writes a second, we let the counter be slightly wrong for a while and fix it: the reconciliation job recounts each post that received likes in the last hour and writes the true count. Recounting a post with ten million likes means reading 16 large partitions, so posts above a million likes are recounted once a day instead of every hour; on a count that size, displayed as "10.2M", a day of small drift is invisible. It is the same bargain as everywhere else in this design: cheap, approximate, and repaired, instead of expensive and exact.
+
+**Reading counts without a stampede.** The counter cache holds each post's counts. Every update invalidates the entry, and on a hot post, thousands of feed requests can miss on the same key in the same millisecond and all go to the database: a <Term id="thundering-herd">thundering herd</Term>. Instagram hit exactly this on popular posts and solved it with memcache's <Term id="cache-lease">lease</Term> mechanism <Cite href="https://instagram-engineering.com/instagration-pt-2-scaling-our-infrastructure-to-multiple-data-centers-5745cbad7834" title="Instagration Pt. 2: Scaling our infrastructure to multiple data centers" author="Instagram Engineering" year="2015" />, from Meta's memcache design <Cite href="https://www.usenix.org/conference/nsdi13/technical-sessions/presentation/nishtala" title="Scaling Memcache at Facebook" author="Rajesh Nishtala et al." year="2013" />. The first client to miss receives a lease token and is the only one allowed to read the database and refill the entry; the others briefly wait and retry, or accept the slightly stale value. With batched counters, the entry changes at most once a second, and leases turn each change into one database read instead of thousands.
+
+## Scaling and bottlenecks
+
+Start from the peaks we estimated: 3.5k posts, 700k feed writes, 350k feed requests, 350k likes, and 7M media requests a second, and up to 45 Tbps out. What breaks first?
+
+**At today's peak:**
+
+- **Ranking is the read path's biggest consumer of compute.** Because later pages read the session snapshot, only the first page of each session ranks: about half of the 350k feed requests, or 175k rankings a second. With a few hundred candidates each, the light model scores on the order of 90M posts a second and the heavy model about 17.5M (175k × 100). That fleet, not the databases, is what grows fastest with engagement, and it is why the two-stage design and the chronological fallback exist.
+- **The feed store absorbs 700k writes a second.** Assume a <Term id="wide-column-store">wide-column</Term> node sustains about 15k small writes a second, the same planning figure the [notification chapter](/chapters/design-a-notification-service#scaling-and-bottlenecks) uses (replace it with your own benchmark). With three replicas: 700k × 3 ÷ 15k ≈ 140 nodes. Reads mostly hit the 4 TB cache in front of it.
+- **Likes write two rows each.** 350k likes × 2 tables × 3 replicas ÷ 15k ≈ 140 more nodes, and the counters about 40 (see [IDs and hot counters](#ids-and-counters)). The like events topic and the counter aggregator scale by adding <Term id="partition">partitions</Term>, because each post's events stay on one partition.
+- **Hydration is a cache problem.** 350k feed requests × 20 posts is 7M post lookups a second, plus 7M count lookups. Recent posts are hot by nature, so at a 95% hit rate the sharded PostgreSQL fleet sees about 350k reads a second, roughly 11k per server across 32 servers. The counter cache serves its 7M reads from memory.
+- **Media processing runs on about 84k cores** for video, sized so the first <Term id="rendition">rendition</Term> of every video keeps up with the evening peak; the rest of each video's renditions fill the troughs on the same machines.
+- **The <Term id="cdn">CDN</Term> carries up to 45 Tbps,** less what device caches absorb. If about a tenth of requests miss every cache layer, as in Meta's photo study, the origin serves about 700k requests a second, which the storage tiers must be designed for.
+
+**At ×10 (35k posts and 3.5M feed requests a second):**
+
+- **Fan-out writes reach 7M a second.** Lowering the push threshold from 100k followers to, say, 10k moves the largest pushes to the pull side, trading writes we pay for on every post for in-memory reads we were already doing. The threshold is the main dial between write cost and read cost.
+- **Ranking needs to do less per request.** Instagram's Explore precomputes some users' recommendations during off-peak hours instead of at request time <Cite href="https://engineering.fb.com/2023/08/09/ml-applications/scaling-instagram-explore-recommendations-system/" title="Scaling the Instagram Explore recommendations system" author="Vladislav Vorotilov, Ilnur Shugaepov" year="2023" />; the same idea, <Term id="feed-ranking">ranking</Term> a user's feed shortly before they usually open the app, moves work from the peak to the trough.
+- **Delivery reaches up to 450 Tbps.** At that volume, cache servers placed inside internet providers' own networks pay for themselves, because the traffic never crosses the open internet.
+- **Storage grows by 3.4 EB of raw media a year.** The 30-day hot window shrinks, and video masters move to the coldest, cheapest storage we have.
+
+**At ×100:**
+
+- **The <Term id="logical-shard">logical shard</Term> count becomes a ceiling.** 8,192 logical shards can spread over at most 8,192 servers. That is a lot of headroom for posts and users, but it is fixed in the id format, so a decision about the id is a decision about the largest the metadata fleet can ever be.
+- **No single region can hold the system, which is the subject of the next section.**
+
+### Regions [#regions]
+
+Running in several regions puts servers near users and survives the loss of one, but only if we are precise about which data must be the same everywhere and which may differ. Instagram's move to several data centers was organized around exactly that split between global data and local data <Cite href="https://instagram-engineering.com/instagration-pt-2-scaling-our-infrastructure-to-multiple-data-centers-5745cbad7834" title="Instagration Pt. 2: Scaling our infrastructure to multiple data centers" author="Instagram Engineering" year="2015" />. <FigRef id="regions" /> shows ours.
+
+<Figure
+  id="regions"
+  src="./figures/regions.svg"
+  alt="Two regions. In region A, the metadata primary for a group of shards serves writes; region B holds a read replica of the same shards, fed by asynchronous replication. Each region has its own services, caches, and feed store for the users homed there. Post events are replicated to both regions, and each region's fan-out service writes the feeds of its own users. Each region's cache invalidation is driven by its own replication stream. Writes from region B for those shards go across to region A's primary."
+  caption="Global data has one primary per shard and replicas everywhere; local data, such as caches and feeds, belongs to one region."
+  width="wide"
+/>
+
+- **Global data** (users, posts, media records, the follow graph, counters) has one primary region per shard and a <Term id="read-replica">read replica</Term> in every other region. Reads are local; writes go to the shard's primary, which adds a cross-region round trip to posting or following. Instagram's infrastructure team describes the same layout for user, media, and friendship data: one primary, replicas in each region, local reads, cross-region writes <Cite href="https://qconsf.com/sf2016/system/files/presentation-slides/scaling_instagram_infrastructure_-_qcon_sf_2016.pdf" title="Scaling Instagram Infrastructure (QCon San Francisco 2016 slides)" author="Lisa Guo" year="2016" />.
+- **Local data** belongs to one region: caches, session snapshots, and feed lists. Each user has a home region. `post.published` events are replicated to every region, and each region's <Term id="fan-out">fan-out</Term> service writes only the feeds of users homed there, so a post fans out once per region over local writes rather than over 700k cross-region writes a second.
+- **Cache invalidation follows replication.** If region B invalidated its cache when region A committed a write, it could refill the cache from a replica that has not received the write yet, and cache the old value indefinitely. So each region invalidates from its *own* replication stream, after its replica has applied the change. Meta's memcache design drives invalidations from the database's commit log for this reason <Cite href="https://www.usenix.org/conference/nsdi13/technical-sessions/presentation/nishtala" title="Scaling Memcache at Facebook" author="Rajesh Nishtala et al." year="2013" />.
+- **Read-your-writes across regions.** A user who likes a post in region B writes to region A's primary, then reloads the post from region B's replica, which may still lag. For a few seconds after a user's write, the service reads that user's own objects from the primary, or waits until the local replica has passed the write's position in the replication log. Everyone else reads the replica.
+- **Media** is uploaded to the nearest region, stored across three zones there before the upload is acknowledged, and copied to a second region within minutes. Any region's origin can serve any media.
+
+**Losing a region.** Reads move to the remaining regions at once; their replicas already hold nearly everything. For shards whose primary was in the lost region, a replica is promoted, which takes minutes, the <Term id="rto">recovery time objective (RTO)</Term>. Metadata written in the last few seconds before the loss may be missing, the <Term id="rpo">recovery point objective (RPO)</Term>: a like, a follow, or a post. For media the window is the copy delay, a few minutes, which is why the durability requirement names region loss separately. The app keeps each uploaded file for a day and sends it again if the server no longer has it, so most of those posts come back on their own. Users homed in the lost region have no feed lists in the surviving regions, so their next request takes the rebuild-by-pull path. That path is slow and expensive, so the feed service admits rebuilds at a controlled rate and serves a chronological pull for everyone else until their turn. A design that rebuilds whole feeds on demand must also limit how many it rebuilds at once.
+
+## Reliability and failure modes
+
+| Component | Failure | Detection | Mitigation |
+| --- | --- | --- | --- |
+| Phone network | Upload drops halfway | Resumes per upload session | Resumable chunks; resume from the server's offset, never from zero |
+| Upload service | Instance crash mid-upload | Session errors | Chunks are stored as they arrive; any instance can continue the session |
+| Object storage | Disk, server, or zone loss | Scrubbing, health checks | Acknowledge only after three-zone durability; copy to a second region |
+| Media processors | Backlog after an evening surge | Queue age per pool | Separate photo and video pools; the publish-path queue is sized for the peak; the rest of the <Term id="rendition">renditions</Term> wait for the trough; the author already sees the post from the phone |
+| Upload service | Crash after acknowledging, before the event is published | Age of the oldest `uploaded` media | The `uploaded` record and its <Term id="transactional-outbox">outbox</Term> row are written together; a sweeper re-enqueues media stuck for ten minutes |
+| Post service | A <Term id="carousel">carousel</Term> item is rejected | Posts in `failed` | The post moves to `failed` and the author is told; it never waits in `processing` forever |
+| Media processors | Poison file crashes the decoder | Repeated failures on one item | Sandboxed decoding, bounded retries, then `rejected` and a dead-letter queue |
+| Post service | Crash between writing a post and publishing its event | Outbox age | The post row and its outbox row commit in one transaction; a relay publishes the event |
+| Fan-out service | Falls behind | Time-to-visible for sampled posts | Scale workers; skip inactive followers; lower the push threshold |
+| Fan-out service | A post from a 100M-follower account | Follower count check | No push; the post goes to the in-memory lists of large accounts |
+| Feed cache or store | Node loss | Miss rate, rebuild rate | Replicas; rebuild by pull at a controlled rate |
+| Ranking service | Slow or down | Deadline misses | Chronological fallback, marked unranked |
+| Counter aggregator | Crash, replayed events | Aggregator lag, reconciliation corrections | Resume from the last committed offset; reconciliation recounts |
+| Counter cache | Many misses on one hot post | Database reads per key | Leases: one refill per change |
+| Metadata shard | Primary fails | Health checks, replication status | Promote a replica; writes to that shard pause for seconds to minutes |
+| <Term id="cdn">CDN</Term> | A <Term id="pop">PoP</Term> or a CDN provider degrades | Edge error rate, client timing | Steer traffic to other PoPs or a second CDN; the <Term id="origin-shield">origin shield</Term> protects storage |
+| Clients after an outage | Every app retries at once | Request rate, upload starts | Jittered backoff in the apps; admission control at the gateway; uploads resume rather than restart |
+| Region | Region lost | Health checks | Reads elsewhere; promote replicas; rebuild feeds at a controlled rate; apps re-send uploads from the last few minutes |
+
+Posting depends on a transactional outbox for a reason worth spelling out. The post service must both mark a post `published` and emit `post.published`. If it did these separately, a crash between them would leave a post that exists but reaches nobody's feed, or an event for a post that was never committed. Writing an outbox row in the same transaction as the post, on the author's shard, and publishing from it afterwards, means the event happens if and only if the post does. The relay may publish an event twice; the <Term id="fan-out">fan-out</Term> service writes the same `(user_id, post_id)` key either way, so a duplicate is harmless.
+
+### The celebrity post end to end [#celebrity-post]
+
+The chapter opened with one concern hiding behind all the others: an account with a hundred million followers. Here is what happens when it posts, in <FigRef id="celebrity-post" />.
+
+<Figure
+  id="celebrity-post"
+  src="./figures/celebrity-post.svg"
+  alt="Sequence diagram. The celebrity's app publishes a post through the post service, which commits it and publishes a post event. The fan-out service sees 100 million followers, above the threshold, and does not write to their feeds; instead every feed service host appends the post to its in-memory list of large accounts' posts. Millions of followers open the app; each feed request reads the post from local memory and ranks it. A storm of likes reaches the like service, which writes like rows and like events; the counter aggregator applies one increment per second, and the counter cache uses leases so each change causes one database read."
+  caption="The worst case, contained. The post costs one write and one event; the readers cost in-memory lookups; the likes cost one counter write a second."
+  width="wide"
+/>
+
+<Steps>
+1. The post is committed on the author's shard with its outbox row, exactly like anyone else's.
+2. The fan-out service sees 100M followers, above the threshold, and writes nothing to their feeds. The 143 seconds of fleet time from the estimate never happen, so nobody else's post waits.
+3. Every feed service host appends the post to its in-memory list of large accounts' posts.
+4. Over the next hour, tens of millions of followers open the app. For each, merging the post into the candidates is a lookup in local memory. No cache node sees a <Term id="hot-key">hot key</Term>, because there is no shared key.
+5. Each feed request ranks the post among the reader's candidates, and it climbs in <Term id="feed-ranking">ranking</Term> as engagement arrives, which is itself one of the ranking signals.
+6. About 1,700 likes a second arrive. Each is two row writes, spread over 16 buckets of `likes_by_post`, and one event.
+7. The aggregator turns them into one counter write a second, and the counter cache refills once per change, through a <Term id="cache-lease">lease</Term>.
+</Steps>
+
+Meanwhile the CDN serves the photo to millions from its edges, and the origin shield fetches it from storage once per region.
+
+Each layer of the design has a specific answer to "what if this author is enormous?" That is the test: not that nothing is hot, but that every hot thing has somewhere designed to land.
+
+## Observability
+
+We measure the system the way people experience it: can they post, how fast does their feed open, and do their friends see what they share?
+
+**Service-level objectives:**
+
+- Feed requests: 99.99% succeed, and <Term id="p99">p99</Term> latency is under 500 ms at our servers.
+- Time-to-visible: 99% of posts from accounts below the push threshold are in their active followers' feed lists within 60 s of publishing.
+- Uploads: 99% of upload sessions that the user does not cancel complete. Photos are published within 10 s and videos within 5 minutes at p99, counted to the first playable <Term id="rendition">rendition</Term>, which is the part of processing sized for the peak (our targets).
+
+**Key metrics and alerts:**
+
+- **Time-to-visible, measured end to end.** Test accounts post every minute in every region, and test followers check their feed lists for the post. This catches every way a post can fail to arrive (a stuck <Term id="transactional-outbox">outbox</Term>, a lagging <Term id="fan-out">fan-out</Term>, a broken threshold check) with one number.
+- **Processing queue age per pool**, in seconds, separately for photos and videos. Video lag during an evening peak is expected; photo lag is not.
+- **Upload resumes and failures by network type and file size.** A rise in resumes on one carrier is a network problem; a rise in failures on large files is often a timeout in our upload service.
+- **Cache <Term id="cache-hit-ratio">hit ratio</Term> per layer**: device, edge, shield, and origin requests per second. A drop in the edge hit ratio shows up first as origin load and storage latency.
+- **Signature rejections at the edge** (HTTP `403`). A spike means a signing-key rotation went wrong, and media is failing for everyone.
+- **Ranking fallback rate.** Every chronological fallback is a feed served worse than it should be.
+- **Counter lag and reconciliation corrections.** Corrections should be rare and small; a large correction means likes are being lost or double-counted.
+- **Feed rebuilds per second.** A rise means feed lists are being lost, or a wave of returning users is arriving, for example after a marketing campaign.
+
+**Tracing.** The upload id, then the media id, then the post id form one chain from the first chunk to the first follower's feed. We log the ids at every hop, so "my friend's post never appeared" is a query, not an investigation.
+
+## Security and privacy
+
+- **Private accounts are enforced twice.** The API checks that the viewer is an approved follower before returning a post. The <Term id="cdn">CDN</Term> checks the signature on every media request, so the media of a private post cannot be fetched without a link that the API issued after that check. Removing a follower takes effect in the API at once and for media when the links already issued expire, within six to twelve hours.
+- **Location is opt-in.** Processors strip all <Term id="exif">EXIF</Term> metadata, including GPS coordinates, from every upload. A location appears only if the user tags one.
+- **Known abuse imagery is blocked at upload.** Processors compare <Term id="perceptual-hash">perceptual hashes</Term> of every upload against industry hash lists of known child sexual abuse material, such as those used with Microsoft's PhotoDNA, which matches images even after they have been altered <Cite href="https://news.microsoft.com/features/microsofts-photodna-protecting-children-and-businesses-in-the-cloud/" title="Microsoft's PhotoDNA: Protecting children and businesses in the cloud" author="Microsoft" />. A match rejects the upload and starts the reporting workflow the law requires.
+- **Untrusted files are decoded in a sandbox and served from a separate domain.** Decoding user-supplied images and videos is one of the oldest attack surfaces on the web. Processors decode in isolated workers with limits on pixels, duration, and memory. Media is served from its own cookie-free domain, with the content type we produced and `X-Content-Type-Options: nosniff`, so a crafted file can never run as a script in the context of our app.
+- **Fake engagement is rate-limited and removed.** Likes, follows, and comments are limited per account and per device, and bursts that look automated are flagged. Removing fake likes deletes their rows, and the counter reconciliation job lowers the count to match.
+- **Ids are guessable, so access is not based on secrecy.** Our ids are <Term id="time-sortable-id">time-sortable</Term> and embed a shard number, so they can be enumerated. Every API call checks authorization, scraping is rate-limited per account and per IP address, and media requires <Term id="signed-url">signed links</Term>.
+- **Deletion means deletion.** A deleted post is a <Term id="tombstone">tombstone</Term> at once, its media links stop working once the CDN purge completes, because the origin refuses to serve deleted media, and its bytes are deleted after the 30-day grace period. Deleting an account removes its posts, media, likes, comments, and follow edges in both directions, and backups age out on a fixed schedule.
+- **Signing keys are rotated** with an overlap period in which the CDN accepts both the old and the new key, so a rotation never breaks the links already in users' feeds.
+
+## Trade-offs and alternatives
+
+<Tradeoffs>
+| Decision | Chosen | Alternative | Why |
+| --- | --- | --- | --- |
+| Upload path | Resumable chunks straight to an upload service | Upload in the body of the post request | Slow connections never hold application servers; a dropped connection resumes |
+| Upload timing | Start when the media is picked | Start when Share is tapped | The bytes are usually stored before the user finishes the caption; costs some abandoned uploads |
+| Processing | Asynchronous, behind a queue; first <Term id="rendition">rendition</Term> sized for the peak, the rest in the troughs | Every rendition inside the upload request | About half the video cores: 84k instead of 168k |
+| Photo and video processing | Separate queues and pools | One shared pool | A surge of long videos cannot delay photos |
+| Video encodings | Basic for all, advanced where watch time is | Every encoding for every video | Compute goes where people watch |
+| Renditions | Four precomputed sizes, chosen by the client | Resize on demand at the edge | Every cache miss is a plain read; the size set is small |
+| Media URLs | Immutable, signed, expiring after six to twelve hours | Public, permanent URLs | Private accounts and deletes keep working behind a <Term id="cdn">CDN</Term>; browser caching still works within a window |
+| Storage | Three copies plus a second-region copy while hot, <Term id="erasure-coding">erasure-coded</Term> across data centers after 30 days | Three copies of everything | About 240 PB less disk in the first year, and it survives a region loss |
+| Feed construction | Hybrid: push below 100k followers, pull above | Pure push or pure pull | Push avoids the 200-way tail; pull avoids 100M-write bursts |
+| Large accounts' posts | In memory on every feed host | A shared cache | No <Term id="hot-key">hot key</Term>; about 96 MB per host |
+| Ranked pagination | Rank once per session, page a snapshot | Re-rank every page | No duplicates or skipped posts between pages |
+| Ranking outage | Chronological fallback | Fail the request | A worse feed beats no feed |
+| Ids | 64-bit, time, shard, sequence, made in each shard | UUID version 7 or a central id service | Half the size of a UUID in every feed entry; no extra service on the write path |
+| Sharding | By user, many <Term id="logical-shard">logical shards</Term> per server | Hashing keys directly to servers | Growth moves whole shards; ids never change |
+| Follow graph | Stored in both directions, repaired asynchronously | One direction only | Both questions are single-shard reads; no cross-shard transaction |
+| Like counts | Batched totals in the <Term id="wide-column-store">wide-column store</Term>, reconciled | Same-transaction counter in PostgreSQL | A hot post costs one write a second instead of 1,700; the long tail's 200k writes a second stay off the relational shards |
+| Regions | One primary per shard, replicas everywhere; feeds local | Writes accepted in every region | No write conflicts on posts, likes, or follows; writes pay a cross-region round trip |
+</Tradeoffs>
+
+## Evolution
+
+Nobody builds this first, including Instagram, which launched with a handful of servers and a small team.
+
+**v1: a small team, the first million users.**
+
+- One web application and one PostgreSQL database. Instagram's early stack was close to this: a Django application and PostgreSQL, running on rented cloud servers, scaled to its first 14 million users with three engineers <Cite href="https://instagram-engineering.com/what-powers-instagram-hundreds-of-instances-dozens-of-technologies-adf2e22da2ad" title="What Powers Instagram: Hundreds of Instances, Dozens of Technologies" author="Instagram Engineering" year="2011" />.
+- Object storage and a <Term id="cdn">CDN</Term> for media **from the first day**. Moving media out of the application later means migrating every URL ever shared; starting there costs nothing.
+- Renditions made by a background job, not in the request.
+- The feed as the join query from [High-level design](#high-level-design), with an index on `(author_id, created_at)`. On one database it is fast enough for a long time.
+- The parts that must be right from the start are the contracts: upload sessions, <Term id="idempotency-key">idempotency keys</Term>, ids sent as strings, a list of <Term id="rendition">renditions</Term> per photo, and signed media URLs. Apps in users' pockets depend on them for years.
+
+**v2: the platform.**
+
+- Shard PostgreSQL by user, with <Term id="logical-shard">logical shards</Term> and ids generated in each shard.
+- Precompute feeds with <Term id="fan-out">fan-out</Term> on write into a fast store. Instagram's activity feed, the list of likes, comments, and follows, ran on a 32-node Redis cluster until memory limits made Cassandra the cheaper option <Cite href="https://datastax.com/blog/facebooks-instagram-making-switch-cassandra-redis-75-insta-savings" title="Facebook's Instagram: Making the Switch to Cassandra from Redis, a 75% 'Insta' Savings" author="DataStax" />.
+- Move likes and comments to a <Term id="wide-column-store">wide-column store</Term>, with batched counters.
+- Split photo and video processing into separate pools; add <Term id="resumable-upload">resumable uploads</Term>.
+
+**v3: global scale.**
+
+- Hybrid fan-out with in-memory lists of large accounts' posts.
+- Staged <Term id="feed-ranking">ranking</Term> with a chronological fallback.
+- Several regions, with global data on one primary per shard and local caches and feeds.
+- A warm, <Term id="erasure-coding">erasure-coded</Term> storage tier, and advanced video encodings made where the watch time justifies them.
+
+## Summary
+
+
+Each requirement maps to a part of the design in <FigRef id="high-level-design" />:
+
+| Requirement | How the design meets it |
+| --- | --- |
+| 100M posts a day from unreliable phones | Resize on the phone, start uploads early, <Term id="resumable-upload">resumable chunks</Term>, acknowledge once durable |
+| Renditions for every screen without blocking the user | Asynchronous processing, separate photo and video pools, basic encodings first |
+| Up to 45 Tbps and 7M media requests a second | Device cache, <Term id="cdn">CDN</Term> edge, <Term id="origin-shield">origin shield</Term>; immutable URLs; storage designed for reads |
+| Feed in under 500 ms at 350k requests a second | Precomputed feed lists, in-memory pulls for large accounts, two-stage <Term id="feed-ranking">ranking</Term> with a deadline |
+| A 100M-follower post | No push above the threshold; in-memory lists; batched counters with leases |
+| Ids across thousands of shards | 64-bit ids with time, <Term id="logical-shard">logical shard</Term>, and sequence, made inside each shard |
+| Never lose an acknowledged upload | Three-zone durability before the acknowledgment; a second region within minutes |
+| Private accounts and deletes | API checks plus signed, expiring media URLs; <Term id="tombstone">tombstones</Term>, CDN purge, delayed byte deletion |
+
+- Keep bytes away from application servers: upload to a service built for it, download from a CDN.
+- Acknowledge when the bytes are durable, and do the slow work behind a queue.
+- Push posts into feeds for ordinary accounts, pull them for enormous ones, and choose the threshold as a dial between write cost and read cost.
+- Rank once per session and page a snapshot; fall back to time order rather than fail.
+- Make ids carry time and location, so sorting and routing need no lookups.
+- Derive counts from rows in batches, and repair them; exact counts are not worth a hot row.
+- Keep URLs immutable and signed, so a CDN can cache everything and still respect privacy and deletes.

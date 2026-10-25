@@ -36,6 +36,7 @@ parts:
     chapters:
       - design-a-notification-service
       - design-google-drive
+      - design-instagram
     planned:
       - design-a-rate-limiter
       - design-a-url-shortener

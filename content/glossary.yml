@@ -289,3 +289,149 @@ crypto-shredding:
 hot-partition:
   term: Hot partition
   definition: One shard or partition that receives far more traffic than the others, usually because a single key is popular, so it saturates while the rest of the cluster sits idle.
+
+cdn:
+  term: Content delivery network (CDN)
+  definition: A network of caching servers placed close to users around the world. It serves copies of files such as images and video so that most requests never travel to the origin servers.
+  owner: caching
+
+pop:
+  term: Point of presence (PoP)
+  definition: A site where a CDN or network runs servers close to users, usually inside or next to an internet exchange or a large internet provider.
+
+origin-shield:
+  term: Origin shield
+  definition: A middle caching layer between a CDN's edge servers and the origin. Edge misses from many sites are funneled through it, so a popular file is fetched from the origin once instead of once per edge site.
+  owner: caching
+
+cache-hit-ratio:
+  term: Cache hit ratio
+  definition: The share of requests a cache answers from its own copy. A 90% hit ratio means one request in ten goes on to the next layer.
+  owner: caching
+
+rendition:
+  term: Rendition
+  definition: One of several versions of the same photo or video produced for delivery, such as a 320-pixel-wide image or a 720p video. Clients download the smallest rendition that looks sharp on their screen.
+
+transcoding:
+  term: Transcoding
+  definition: Decoding a video or image and encoding it again in a different format, resolution, or quality. It is the most compute-hungry step of a media pipeline.
+
+adaptive-bitrate:
+  term: Adaptive bitrate (ABR) streaming
+  definition: Delivering video as short segments available at several quality levels, so the player can switch to a lower or higher quality from one segment to the next as the network changes.
+
+progressive-jpeg:
+  term: Progressive JPEG
+  definition: A JPEG stored as several passes over the whole image, from blurry to sharp, so a viewer can show a rough version after the first pass instead of waiting for the full file.
+
+exif:
+  term: EXIF metadata
+  definition: Information a camera embeds in a photo file, such as the camera model, the time, the orientation, and often the GPS coordinates of where it was taken.
+
+decompression-bomb:
+  term: Decompression bomb
+  definition: A small file crafted to expand to an enormous size when decoded, such as an image that declares billions of pixels, used to exhaust the memory or CPU of the server that processes it.
+
+perceptual-hash:
+  term: Perceptual hash
+  definition: A fingerprint computed from what an image looks like rather than from its exact bytes, so resized or slightly edited copies of the same picture still produce matching fingerprints.
+
+object-storage:
+  term: Object storage
+  definition: Storage that keeps whole files ("objects") under a key and serves them over HTTP, with no folders or in-place edits. Amazon S3 is the best-known example.
+
+eventual-consistency:
+  term: Eventual consistency
+  definition: A guarantee that if writes stop, every copy of the data converges to the same value. In the meantime, different readers may briefly see older values.
+  owner: consistency-models
+
+replication-lag:
+  term: Replication lag
+  definition: How far a replica trails the primary it copies from, usually measured in seconds. A read from a lagging replica can miss a write that has already succeeded.
+  owner: replication
+
+read-replica:
+  term: Read replica
+  definition: A copy of a database that receives the primary's changes and serves reads, so read traffic scales out while every write still goes to the primary.
+  owner: replication
+
+fan-out-on-write:
+  term: Fan-out on write (push)
+  definition: Building each user's feed ahead of time. When someone posts, the system writes a reference to the post into the stored feed of every follower, so reading a feed is a single lookup.
+  owner: design-instagram
+
+fan-out-on-read:
+  term: Fan-out on read (pull)
+  definition: Building a feed when it is requested, by fetching recent posts from every account the reader follows and merging them. Posting is cheap; every feed read does the work.
+  owner: design-instagram
+
+celebrity-problem:
+  term: Celebrity problem
+  definition: The cost spike when an account with millions of followers posts. In a fan-out-on-write feed, one post turns into millions of writes at once.
+  owner: design-instagram
+
+social-graph:
+  term: Social graph
+  definition: The set of relationships between accounts, such as who follows whom, stored as edges between user ids.
+
+candidate-generation:
+  term: Candidate generation
+  definition: The first stage of a ranking system. It cheaply gathers a few hundred or thousand items that might be relevant, so that the expensive ranking models only score that short list.
+
+two-tower-model:
+  term: Two-tower model
+  definition: A recommendation model with one neural network for users and one for items. Each produces an embedding on its own, so item embeddings can be computed ahead of time and matched to a user quickly.
+
+feed-hydration:
+  term: Hydration
+  definition: Turning a list of ids into full objects for display, by fetching each post's caption, author, media URLs, counts, and the viewer's own state, usually in a few batched reads.
+
+cursor-pagination:
+  term: Cursor pagination
+  definition: Paging through results with an opaque bookmark returned by the server ("continue after this item") instead of a page number, so items added or removed in the meantime do not shift the pages.
+
+logical-shard:
+  term: Logical shard
+  definition: A fixed slice of the data, many of which are placed on each physical database server. Moving a logical shard to a new server rebalances load without rehashing any keys.
+  owner: sharding-and-partitioning
+
+time-sortable-id:
+  term: Time-sortable id
+  definition: A unique id whose leading bits are a timestamp, so sorting ids also sorts records by creation time, and a range of ids corresponds to a range of time.
+  owner: unique-id-generation
+
+denormalization:
+  term: Denormalization
+  definition: Storing a derived or duplicated value, such as a like count, next to the data that is read with it, so reads avoid a join or a count at the cost of keeping the copy up to date.
+
+hot-key:
+  term: Hot key
+  definition: A single cache or database key that receives a disproportionate share of traffic, such as a celebrity's newest post, so the one node that owns it overloads.
+  owner: caching
+
+thundering-herd:
+  term: Thundering herd
+  definition: Many clients missing the same cache entry at the same moment and all asking the database for it at once, often right after the entry expires or is invalidated.
+  owner: caching
+
+cache-lease:
+  term: Cache lease
+  definition: A token a cache hands to the first client that misses on a key. Only that client may refill the entry; others wait briefly or use a stale value, so one miss causes one database read instead of thousands.
+  owner: caching
+
+tombstone:
+  term: Tombstone
+  definition: A marker recording that an item was deleted. Readers treat the item as gone right away, while the actual bytes are removed later by a cleanup job.
+
+mau:
+  term: Monthly active users (MAU)
+  definition: The number of distinct users who use a product at least once in a month. It is always larger than daily active users, often several times larger.
+
+carousel:
+  term: Carousel
+  definition: A single post that holds several photos or videos, which the viewer swipes through. It has one caption, one set of likes, and one set of comments.
+
+feed-ranking:
+  term: Feed ranking
+  definition: Ordering a feed by how likely the viewer is to be interested in each post, predicted by models from signals such as past interactions, instead of strictly by time.

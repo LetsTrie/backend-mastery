@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { parse } from "yaml";
 
@@ -10,6 +10,8 @@ export function getAliasRedirects() {
   const dir = path.join(process.cwd(), "content", "chapters");
   return readdirSync(dir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith("_"))
+    // A chapter folder holds only outline.md until its outline is approved.
+    .filter((entry) => existsSync(path.join(dir, entry.name, "index.mdx")))
     .flatMap((entry) => {
       const source = readFileSync(path.join(dir, entry.name, "index.mdx"), "utf8");
       const frontmatter = /^---\n([\s\S]*?)\n---/.exec(source)?.[1];
